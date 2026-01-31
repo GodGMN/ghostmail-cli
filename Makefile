@@ -99,3 +99,13 @@ deps:
 ## check: Run all checks (fmt, vet, test)
 check: fmt vet test
 	@echo "All checks passed!"
+
+## ci-check: Run full CI checks locally (tests, vet, formatting)
+ci-check: test vet
+	@echo "Checking formatting..."
+@if [ -n "$$(gofmt -s -l .)" ]; then \
+		echo "Go code is not formatted:"; \
+		gofmt -s -l .; \
+		exit 1; \
+	fi
+	@echo "All CI checks passed!"
