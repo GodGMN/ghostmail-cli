@@ -39,18 +39,18 @@ func TestJSONOutput_Print(t *testing.T) {
 		validate func(string) bool
 	}{
 		{
-			name:   "simple map without indent",
-			indent: false,
-			data:   map[string]string{"key": "value"},
+			name:    "simple map without indent",
+			indent:  false,
+			data:    map[string]string{"key": "value"},
 			wantErr: false,
 			validate: func(s string) bool {
 				return !strings.Contains(s, "\n") && strings.Contains(s, `"key":"value"`)
 			},
 		},
 		{
-			name:   "simple map with indent",
-			indent: true,
-			data:   map[string]string{"key": "value"},
+			name:    "simple map with indent",
+			indent:  true,
+			data:    map[string]string{"key": "value"},
 			wantErr: false,
 			validate: func(s string) bool {
 				return strings.Contains(s, "\n") && strings.Contains(s, `  "key"`)

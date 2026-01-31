@@ -5,12 +5,12 @@ import (
 	"os"
 	"strings"
 
-	"github.com/fatih/color"
-	"github.com/spf13/cobra"
 	"github.com/GodGMN/ghostmail-cli/internal/config"
 	emailinternal "github.com/GodGMN/ghostmail-cli/internal/email"
 	"github.com/GodGMN/ghostmail-cli/internal/output"
 	emailtypes "github.com/GodGMN/ghostmail-cli/pkg/email"
+	"github.com/fatih/color"
+	"github.com/spf13/cobra"
 )
 
 func newReplyCmd() *cobra.Command {

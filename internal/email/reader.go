@@ -7,11 +7,11 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/GodGMN/ghostmail-cli/internal/config"
+	emailtypes "github.com/GodGMN/ghostmail-cli/pkg/email"
 	"github.com/emersion/go-imap"
 	"github.com/emersion/go-imap/client"
 	"github.com/emersion/go-message/mail"
-	"github.com/GodGMN/ghostmail-cli/internal/config"
-	emailtypes "github.com/GodGMN/ghostmail-cli/pkg/email"
 )
 
 // Reader handles email reading operations via IMAP.
