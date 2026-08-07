@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [1.0.3] - 2026-08-07
+
 ### Added
 - IMAP message reads now include attachment filename, content type, and decoded size metadata.
 - Published release artifacts include SHA-256 checksums.
@@ -83,6 +85,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > **Note:** The `v1.0.0` tag predates `cmd/ghostmail/main.go` and produces no
 > installable binary. Do not `go install ...@v1.0.0`. Use `v1.0.1` or later.
 
+[1.0.3]: https://github.com/GodGMN/ghostmail-cli/releases/tag/v1.0.3
 [1.0.2]: https://github.com/GodGMN/ghostmail-cli/releases/tag/v1.0.2
 [1.0.1]: https://github.com/GodGMN/ghostmail-cli/releases/tag/v1.0.1
 [1.0.0]: https://github.com/GodGMN/ghostmail-cli/releases/tag/v1.0.0
