@@ -191,7 +191,17 @@ jobs:
       - name: Generate SHA-256 checksums
         run: |
           cd dist
-          sha256sum ghostmail-* > ghostmail-checksums.txt
+          # Hash only the release binaries. The glob is deliberately NOT used
+          # because signing (above) has already produced *.sig/*.pem siblings
+          # that also match `ghostmail-*`; including them would bloat the file
+          # with non-downloadable asset hashes.
+          sha256sum \
+            ghostmail-linux-amd64 \
+            ghostmail-linux-arm64 \
+            ghostmail-darwin-amd64 \
+            ghostmail-darwin-arm64 \
+            ghostmail-windows-amd64.exe \
+            > ghostmail-checksums.txt
           cat ghostmail-checksums.txt
 
       - name: Generate SBOM
@@ -226,10 +236,14 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@6cbd405e2c4e67a21c47fa9e383d020e4e28b836 # v2.3.3
         with:
+          # A single glob uploads every dist artifact that starts with
+          # `ghostmail-`: the binaries, their .sig/.pem provenance pairs, the
+          # checksum file, and the SBOM. Do NOT also list checksums/SBOM
+          # explicitly — overlapping the glob makes action-gh-release upload
+          # them twice and the second attempt fails with
+          # "Not Found / update-a-release-asset".
           files: |
             artifacts/ghostmail-*
-            artifacts/ghostmail-checksums.txt
-            artifacts/ghostmail-sbom.spdx.json
           generate_release_notes: true
           body: |
             ## Verifying the release
