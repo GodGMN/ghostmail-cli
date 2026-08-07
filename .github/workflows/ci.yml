@@ -71,6 +71,11 @@ jobs:
       - name: Run go vet
         run: go vet ./...
       - name: Run tests with race detection and coverage
+        # Use bash on every OS (including Windows runners, which ship Git
+        # Bash) so the `./...` package pattern and `-coverprofile=coverage.out`
+        # argument are parsed identically. PowerShell mangles them, producing
+        # spurious `package .out not found` errors.
+        shell: bash
         run: go test -race -count=1 -coverprofile=coverage.out ./...
 
       # Coverage is only collected once (Linux) to avoid duplicate uploads.

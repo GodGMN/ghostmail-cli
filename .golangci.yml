@@ -48,6 +48,15 @@ linters:
         - name: time-naming
         - name: var-declaration
         - name: var-naming
+  exclusions:
+    # Test helpers commonly have unused parameters, naming exceptions, and
+    # intentionally ignore teardown/cleanup errors.
+    rules:
+      - path: _test\.go
+        linters:
+          - unparam
+          - revive
+          - errcheck
 
 formatters:
   enable:
@@ -59,14 +68,5 @@ formatters:
         - github.com/GodGMN/ghostmail-cli
 
 issues:
-  exclude-rules:
-    # Test helpers commonly have unused parameters, naming exceptions, and
-    # intentionally ignore teardown/cleanup errors.
-    - paths:
-        - _test\.go
-      linters:
-        - unparam
-        - revive
-        - errcheck
   max-issues-per-linter: 0
   max-same-issues: 0
