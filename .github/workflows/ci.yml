@@ -87,6 +87,35 @@ jobs:
           path: coverage.out
           retention-days: 14
 
+      # Fail the build when total statement coverage drops below the threshold.
+      - name: Enforce coverage threshold
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: |
+          total="$(go tool cover -func=coverage.out | awk '/^total:/{gsub(/%/,"",$3); print $3}')"
+          threshold="80"
+          echo "Total coverage: ${total}% (threshold ${threshold}%)"
+          if [ -z "$total" ]; then
+            echo "::error::could not determine total coverage from coverage.out"
+            exit 1
+          fi
+          if awk "BEGIN{exit !($total < $threshold)}"; then
+            echo "::error::total coverage ${total}% is below the ${threshold}% threshold"
+            exit 1
+          fi
+
+      # Short fuzz runs of the MIME/text parsers on Linux only. A crashing
+      # input fails the job and is saved under internal/email/testdata/fuzz.
+      - name: Fuzz MIME and text parsers
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: |
+          go test -run='^$' -fuzz=FuzzExtractBody -fuzztime=15s ./internal/email/
+          go test -run='^$' -fuzz=FuzzStripHTML -fuzztime=15s ./internal/email/
+          go test -run='^$' -fuzz=FuzzDecodeHeader -fuzztime=10s ./internal/email/
+          go test -run='^$' -fuzz=FuzzSafeSlicePrefix -fuzztime=10s ./internal/email/
+          go test -run='^$' -fuzz=FuzzFormatQuotedReply -fuzztime=10s ./internal/email/
+
   vulnscan:
     name: Reachable vulnerability scan
     runs-on: ubuntu-latest

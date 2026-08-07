@@ -143,17 +143,12 @@ For more help, use: ghostmail reply --help`,
 					}
 				}
 				// Also add original To recipients if not the sender
+				fromBare := bareEmail(original.From)
 				for _, addr := range original.To {
-					if !isSelf(addr, cfg.SMTP.From, cfg.SMTP.Username) && addr != original.From {
-						// Avoid duplicates
-						found := false
-						for _, existing := range cc {
-							if existing == addr {
-								found = true
-								break
-							}
-						}
-						if !found {
+					if !isSelf(addr, cfg.SMTP.From, cfg.SMTP.Username) && bareEmail(addr) != fromBare {
+						// Avoid duplicates (normalized comparison, so a bare
+						// address matches its "Name <addr>" display-name form)
+						if !ccContains(cc, addr) {
 							cc = append(cc, addr)
 						}
 					}
@@ -240,20 +235,34 @@ For more help, use: ghostmail reply --help`,
 	return cmd
 }
 
-// isSelf checks if an address belongs to the current user
-func isSelf(addr, from, username string) bool {
-	addr = strings.ToLower(addr)
-	from = strings.ToLower(from)
-	username = strings.ToLower(username)
-
-	// Extract email from "Name <email>" format
-	if idx := strings.LastIndex(addr, "<"); idx != -1 {
-		if endIdx := strings.LastIndex(addr, ">"); endIdx != -1 && endIdx > idx {
-			addr = addr[idx+1 : endIdx]
+// bareEmail normalizes an RFC 5322 address to its lowercase email portion,
+// stripping any display name (e.g. "Name <user@example.com>" -> "user@example.com").
+// Inputs without a bracketed address are returned as-is (lowercased).
+func bareEmail(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	if idx := strings.LastIndex(s, "<"); idx != -1 {
+		if endIdx := strings.LastIndex(s, ">"); endIdx != -1 && endIdx > idx {
+			return s[idx+1 : endIdx]
 		}
 	}
+	return s
+}
 
-	return addr == from || addr == username
+// ccContains reports whether cc already contains an address matching addr after
+// display-name stripping and case folding.
+func ccContains(cc []string, addr string) bool {
+	bare := bareEmail(addr)
+	for _, existing := range cc {
+		if bareEmail(existing) == bare {
+			return true
+		}
+	}
+	return false
+}
+
+// isSelf checks if an address belongs to the current user.
+func isSelf(addr, from, username string) bool {
+	return bareEmail(addr) == bareEmail(from) || bareEmail(addr) == bareEmail(username)
 }
 
 // buildReferencesChain constructs the References header value for a reply per

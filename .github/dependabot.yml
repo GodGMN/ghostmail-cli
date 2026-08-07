@@ -4,7 +4,17 @@ updates:
     directory: "/"
     schedule:
       interval: weekly
+    # Only bump the version required by the update; avoid noisy go directive churn.
+    versioning-strategy: increase-if-necessary
+    groups:
+      go:
+        patterns:
+          - "*"
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
       interval: weekly
+    groups:
+      actions:
+        patterns:
+          - "*"

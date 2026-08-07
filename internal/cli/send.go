@@ -52,7 +52,7 @@ HTML content can be provided with --html-file for rich formatting.
 REQUIRED FLAGS:
   --to      Recipient email address(es)
   --subject Email subject line
-  --body    Email body text (or use --body-file)
+  --body    Email body text (or use --body-file or --html-file; one is required)
 
 EXAMPLES:
   # Simple text email

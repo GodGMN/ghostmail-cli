@@ -81,6 +81,9 @@ func (c *Config) ValidateSMTP() error {
 	if !c.SMTP.UseTLS && !c.SMTP.StartTLS && !c.SMTP.AllowInsecure {
 		return fmt.Errorf("SMTP requires TLS or STARTTLS (set GHOSTMAIL_SMTP_USE_TLS=true or GHOSTMAIL_SMTP_STARTTLS=true; GHOSTMAIL_SMTP_ALLOW_INSECURE=true permits plaintext credentials and is unsafe)")
 	}
+	if c.SMTP.Port < 1 || c.SMTP.Port > 65535 {
+		return fmt.Errorf("SMTP port must be between 1 and 65535 (set GHOSTMAIL_SMTP_PORT)")
+	}
 	return nil
 }
 
@@ -97,6 +100,9 @@ func (c *Config) ValidateIMAP() error {
 	}
 	if !c.IMAP.UseTLS && !c.IMAP.StartTLS && !c.IMAP.AllowInsecure {
 		return fmt.Errorf("IMAP requires TLS or STARTTLS (set GHOSTMAIL_IMAP_USE_TLS=true or GHOSTMAIL_IMAP_STARTTLS=true; GHOSTMAIL_IMAP_ALLOW_INSECURE=true permits plaintext credentials and is unsafe)")
+	}
+	if c.IMAP.Port < 1 || c.IMAP.Port > 65535 {
+		return fmt.Errorf("IMAP port must be between 1 and 65535 (set GHOSTMAIL_IMAP_PORT)")
 	}
 	return nil
 }

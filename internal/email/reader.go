@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/emersion/go-imap"
@@ -85,6 +86,14 @@ const (
 	// preview (--raw) mode. It is intentionally small so that listing a
 	// preview is cheap even when the full message is very large.
 	previewMessageBytes = 4 << 10
+
+	// connectTimeout bounds the TCP dial and initial IMAP greeting so a
+	// stalled server cannot hang the CLI indefinitely at connect time.
+	connectTimeout = 15 * time.Second
+	// commandTimeout bounds each individual IMAP command. It is generous
+	// enough for large body fetches while still preventing an unresponsive
+	// server from blocking the CLI forever.
+	commandTimeout = 60 * time.Second
 )
 
 var (
@@ -126,18 +135,26 @@ func (r *Reader) Connect() (*client.Client, error) {
 		return nil, fmt.Errorf("refusing to send IMAP credentials without TLS or STARTTLS (set GHOSTMAIL_IMAP_ALLOW_INSECURE=true only for an explicitly trusted plaintext server)")
 	}
 
+	// A dialer timeout bounds both the TCP connection and the greeting wait
+	// (the go-imap client applies it as a connection deadline until the first
+	// command clears it).
+	dialer := &net.Dialer{Timeout: connectTimeout}
+
 	var c *client.Client
 	var err error
 
 	if r.config.UseTLS {
-		c, err = client.DialTLS(addr, r.tlsConfig())
+		c, err = client.DialWithDialerTLS(dialer, addr, r.tlsConfig())
 	} else {
-		c, err = client.Dial(addr)
+		c, err = client.DialWithDialer(dialer, addr)
 	}
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to IMAP server: %w", err)
 	}
+	// Bound individual commands so a server that stops responding mid-session
+	// cannot hang the CLI.
+	c.Timeout = commandTimeout
 	if r.config.StartTLS && !r.config.UseTLS {
 		if err := c.StartTLS(r.tlsConfig()); err != nil {
 			c.Logout()
@@ -257,10 +274,12 @@ func (r *Reader) ReadMessage(uid uint32) (*emailtypes.Message, error) {
 		imap.FetchEnvelope,
 		imap.FetchFlags,
 		imap.FetchRFC822Size,
-		imap.FetchBody,
 	}
 
 	// Request only enough data to detect messages that exceed the parsing limit.
+	// Note: BODY[] (FetchBody) is deliberately NOT requested alongside the
+	// partial section; requesting both makes servers transfer the full message
+	// twice. The partial section alone caps the transfer at maxMessageBytes.
 	section := &imap.BodySectionName{Peek: true, Partial: []int{0, maxMessageBytes + 1}}
 	items = append(items, section.FetchItem())
 

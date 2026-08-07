@@ -1,4 +1,4 @@
-.PHONY: build build-all build-linux build-darwin build-windows test clean install help cover
+.PHONY: build build-all build-linux build-darwin build-windows test clean install help cover cover-check fuzz
 
 # Variables
 BINARY_NAME=ghostmail
@@ -108,6 +108,24 @@ cover:
 	go test -race -coverprofile=coverage.out ./...
 	go tool cover -func=coverage.out | tail -1
 
+## cover-check: Enforce the CI coverage threshold (80%)
+cover-check:
+	@echo "Enforcing coverage threshold..."
+	@go test -race -count=1 -coverprofile=/tmp/ghostmail-cover.out ./... > /dev/null
+	@total=$$(go tool cover -func=/tmp/ghostmail-cover.out | awk '/^total:/{gsub(/%/,"",$$3); print $$3}'); \
+		echo "Total coverage: $$total% (threshold 80%)"; \
+		if [ -z "$$total" ]; then rm -f /tmp/ghostmail-cover.out; echo "could not determine total coverage"; exit 1; fi; \
+		if awk "BEGIN{exit !($$total < 80)}"; then rm -f /tmp/ghostmail-cover.out; echo "coverage below threshold"; exit 1; fi; \
+		rm -f /tmp/ghostmail-cover.out
+
+## fuzz: Short fuzz runs of the MIME/text parsers (mirrors CI)
+fuzz:
+	go test -run='^$$' -fuzz=FuzzExtractBody -fuzztime=15s ./internal/email/
+	go test -run='^$$' -fuzz=FuzzStripHTML -fuzztime=15s ./internal/email/
+	go test -run='^$$' -fuzz=FuzzDecodeHeader -fuzztime=10s ./internal/email/
+	go test -run='^$$' -fuzz=FuzzSafeSlicePrefix -fuzztime=10s ./internal/email/
+	go test -run='^$$' -fuzz=FuzzFormatQuotedReply -fuzztime=10s ./internal/email/
+
 ## deps: Download dependencies
 deps:
 	@echo "Downloading dependencies..."
@@ -119,7 +137,7 @@ check: fmt vet lint test
 	@echo "All checks passed!"
 
 ## ci-check: Run full CI checks locally (tests, vet, lint, vulnerability scan, formatting, module hygiene)
-ci-check: test vet lint
+ci-check: test vet lint cover-check
 	@echo "Checking go.mod/go.sum are tidy..."
 	@cp go.mod go.mod.bak && cp go.sum go.sum.bak
 	@go mod tidy

@@ -10,11 +10,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - IMAP message reads now include attachment filename, content type, and decoded size metadata.
 - Published release artifacts include SHA-256 checksums.
+- Fuzz targets for the MIME/text parsers (`FuzzExtractBody`, `FuzzStripHTML`, `FuzzDecodeHeader`, `FuzzSafeSlicePrefix`, `FuzzFormatQuotedReply`), run for a short duration in CI.
+- CI now enforces a total coverage threshold (80%) and fails the build if coverage drops below it.
+- Dependabot now groups dependency updates and uses `increase-if-necessary` for Go modules to reduce update churn.
 
 ### Fixed
 - Restored the `cmd/ghostmail` executable entry point required to build release artifacts.
 - `ghostmail config check` now exits unsuccessfully when required configuration is missing.
 - The `v1.0.0` tag predates the `cmd/ghostmail` entry point and cannot produce a release artifact. It remains immutable for history and must not be treated as an installable release; `v1.0.1` is the corrective release.
+- IMAP connections now apply a 15s connect/greeting timeout and a 60s per-command timeout, so a stalled server can no longer hang the CLI indefinitely.
+- Full message reads no longer request `BODY[]` alongside a size-capped partial fetch, avoiding a double transfer of the message body.
+- `reply --all` now strips display names before comparing/skipping the original sender and de-duplicating CC recipients.
+- SMTP and IMAP configuration validation now rejects ports outside the 1-65535 range.
 
 ### Changed
 - The project and release CI now require patched Go 1.25.12; direct and indirect Go dependencies were updated, including migration to maintained `github.com/wneessen/go-mail`.

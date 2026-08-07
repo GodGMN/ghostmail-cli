@@ -79,6 +79,27 @@ func TestFormattingHelpers(t *testing.T) {
 	if isSelf("other@example.com", "me@example.com", "me@example.com") {
 		t.Error("isSelf() matched an unrelated address")
 	}
+	// A display-name formatted From/username must still match the bare address.
+	if !isSelf("me@example.com", "Me <me@example.com>", "alias <alias@example.com>") {
+		t.Error("isSelf() should strip display names from all inputs")
+	}
+	if isSelf("cc@example.com", "Me <me@example.com>", "me@example.com") {
+		t.Error("isSelf() matched an unrelated address against a display-name From")
+	}
+	// bareEmail normalization.
+	if got := bareEmail("Name <USER@Example.COM>"); got != "user@example.com" {
+		t.Errorf("bareEmail() = %q, want user@example.com", got)
+	}
+	if got := bareEmail("user@example.com"); got != "user@example.com" {
+		t.Errorf("bareEmail() = %q, want unchanged", got)
+	}
+	// ccContains matches after normalization, deduping bare vs display-name forms.
+	if !ccContains([]string{"Name <a@example.com>"}, "a@example.com") {
+		t.Error("ccContains() should match bare address against display-name entry")
+	}
+	if ccContains([]string{"a@example.com"}, "b@example.com") {
+		t.Error("ccContains() matched an unrelated address")
+	}
 }
 
 func TestMaskPassword(t *testing.T) {

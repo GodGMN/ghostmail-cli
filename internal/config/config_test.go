@@ -147,6 +147,7 @@ func TestValidateSMTP(t *testing.T) {
 			config: Config{
 				SMTP: SMTPConfig{
 					Host:     "smtp.example.com",
+					Port:     587,
 					Username: "test@example.com",
 					Password: "password",
 					StartTLS: true,
@@ -157,16 +158,30 @@ func TestValidateSMTP(t *testing.T) {
 		{
 			name: "plaintext requires explicit opt-in",
 			config: Config{SMTP: SMTPConfig{
-				Host: "smtp.example.com", Username: "test@example.com", Password: "password",
+				Host: "smtp.example.com", Port: 587, Username: "test@example.com", Password: "password",
 			}},
 			wantErr: true,
 		},
 		{
 			name: "explicit plaintext opt-in",
 			config: Config{SMTP: SMTPConfig{
-				Host: "smtp.example.com", Username: "test@example.com", Password: "password", AllowInsecure: true,
+				Host: "smtp.example.com", Port: 587, Username: "test@example.com", Password: "password", AllowInsecure: true,
 			}},
 			wantErr: false,
+		},
+		{
+			name: "port below range",
+			config: Config{SMTP: SMTPConfig{
+				Host: "smtp.example.com", Port: 0, Username: "test@example.com", Password: "password", StartTLS: true,
+			}},
+			wantErr: true,
+		},
+		{
+			name: "port above range",
+			config: Config{SMTP: SMTPConfig{
+				Host: "smtp.example.com", Port: 70000, Username: "test@example.com", Password: "password", StartTLS: true,
+			}},
+			wantErr: true,
 		},
 		{
 			name: "missing host",
@@ -227,6 +242,7 @@ func TestValidateIMAP(t *testing.T) {
 			config: Config{
 				IMAP: IMAPConfig{
 					Host:     "imap.example.com",
+					Port:     993,
 					Username: "test@example.com",
 					Password: "password",
 					UseTLS:   true,
@@ -237,16 +253,30 @@ func TestValidateIMAP(t *testing.T) {
 		{
 			name: "plaintext requires explicit opt-in",
 			config: Config{IMAP: IMAPConfig{
-				Host: "imap.example.com", Username: "test@example.com", Password: "password",
+				Host: "imap.example.com", Port: 993, Username: "test@example.com", Password: "password",
 			}},
 			wantErr: true,
 		},
 		{
 			name: "STARTTLS is secure",
 			config: Config{IMAP: IMAPConfig{
-				Host: "imap.example.com", Username: "test@example.com", Password: "password", StartTLS: true,
+				Host: "imap.example.com", Port: 143, Username: "test@example.com", Password: "password", StartTLS: true,
 			}},
 			wantErr: false,
+		},
+		{
+			name: "port below range",
+			config: Config{IMAP: IMAPConfig{
+				Host: "imap.example.com", Port: 0, Username: "test@example.com", Password: "password", UseTLS: true,
+			}},
+			wantErr: true,
+		},
+		{
+			name: "port above range",
+			config: Config{IMAP: IMAPConfig{
+				Host: "imap.example.com", Port: 70000, Username: "test@example.com", Password: "password", UseTLS: true,
+			}},
+			wantErr: true,
 		},
 		{
 			name: "missing host",

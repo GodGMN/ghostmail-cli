@@ -125,7 +125,7 @@ ghostmail send --to recipient@example.com --subject "Hello" --body "World"
 |------|-------|-------------|
 | `--to` | `-t` | Recipient email address (repeatable) |
 | `--subject` | `-s` | Email subject |
-| `--body` | `-m` | Email body text (or use `--body-file`) |
+| `--body` | `-m` | Email body text. One of `--body`, `--body-file`, or `--html-file` is required |
 
 **Optional Flags:**
 | Flag | Short | Description |
@@ -581,6 +581,8 @@ make clean
 | `build-all` | Build for all platforms |
 | `test` | Run tests with race detection |
 | `cover` | Generate a coverage report |
+| `cover-check` | Enforce the CI coverage threshold (80%) |
+| `fuzz` | Short fuzz runs of the MIME/text parsers (mirrors CI) |
 | `fmt` | Format Go code (`go fmt` + `gofmt -s`) |
 | `vet` | Run `go vet` |
 | `lint` | Run `golangci-lint` (requires `.golangci.yml`) |
