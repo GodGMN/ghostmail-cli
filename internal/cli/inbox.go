@@ -99,7 +99,7 @@ For more help, use: ghostmail inbox --help`,
 			// Header
 			headerFmt := "%s\t%s\t%s\t%s\n"
 			if !noColor {
-				headerFmt = color.New(color.Bold).Sprintf(headerFmt)
+				headerFmt = color.New(color.Bold).Sprint(headerFmt)
 			}
 			fmt.Fprintf(w, headerFmt, "UID", "FROM", "SUBJECT", "DATE")
 

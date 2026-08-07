@@ -100,10 +100,12 @@ deps:
 check: fmt vet test
 	@echo "All checks passed!"
 
-## ci-check: Run full CI checks locally (tests, vet, formatting)
+## ci-check: Run full CI checks locally (tests, vet, vulnerability scan, formatting)
 ci-check: test vet
+	@echo "Scanning for reachable vulnerabilities..."
+	go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
 	@echo "Checking formatting..."
-@if [ -n "$$(gofmt -s -l .)" ]; then \
+	@if [ -n "$$(gofmt -s -l .)" ]; then \
 		echo "Go code is not formatted:"; \
 		gofmt -s -l .; \
 		exit 1; \

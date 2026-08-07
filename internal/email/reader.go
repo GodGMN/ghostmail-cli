@@ -2,9 +2,13 @@
 package email
 
 import (
+	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/GodGMN/ghostmail-cli/internal/config"
@@ -12,6 +16,18 @@ import (
 	"github.com/emersion/go-imap"
 	"github.com/emersion/go-imap/client"
 	"github.com/emersion/go-message/mail"
+)
+
+const (
+	maxMessageBytes    = 10 << 20
+	maxBodyBytes       = 2 << 20
+	maxAttachmentBytes = 8 << 20
+)
+
+var (
+	errMessageTooLarge    = errors.New("message exceeds maximum size")
+	errBodyTooLarge       = errors.New("message body exceeds maximum size")
+	errAttachmentTooLarge = errors.New("attachment exceeds maximum size")
 )
 
 // Reader handles email reading operations via IMAP.
@@ -26,19 +42,28 @@ func NewReader(cfg *config.IMAPConfig) *Reader {
 
 // Connect establishes a connection to the IMAP server.
 func (r *Reader) Connect() (*client.Client, error) {
-	addr := fmt.Sprintf("%s:%d", r.config.Host, r.config.Port)
+	addr := net.JoinHostPort(r.config.Host, strconv.Itoa(r.config.Port))
+	if !r.config.UseTLS && !r.config.StartTLS && !r.config.AllowInsecure {
+		return nil, fmt.Errorf("refusing to send IMAP credentials without TLS or STARTTLS (set GHOSTMAIL_IMAP_ALLOW_INSECURE=true only for an explicitly trusted plaintext server)")
+	}
 
 	var c *client.Client
 	var err error
 
 	if r.config.UseTLS {
-		c, err = client.DialTLS(addr, nil)
+		c, err = client.DialTLS(addr, &tls.Config{MinVersion: tls.VersionTLS12, ServerName: r.config.Host})
 	} else {
 		c, err = client.Dial(addr)
 	}
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to IMAP server: %w", err)
+	}
+	if r.config.StartTLS && !r.config.UseTLS {
+		if err := c.StartTLS(&tls.Config{MinVersion: tls.VersionTLS12, ServerName: r.config.Host}); err != nil {
+			c.Logout()
+			return nil, fmt.Errorf("failed to start IMAP TLS: %w", err)
+		}
 	}
 
 	if err := c.Login(r.config.Username, r.config.Password); err != nil {
@@ -156,7 +181,8 @@ func (r *Reader) ReadMessage(uid uint32) (*emailtypes.Message, error) {
 		imap.FetchBody,
 	}
 
-	section := &imap.BodySectionName{}
+	// Request only enough data to detect messages that exceed the parsing limit.
+	section := &imap.BodySectionName{Peek: true, Partial: []int{0, maxMessageBytes + 1}}
 	items = append(items, section.FetchItem())
 
 	messages := make(chan *imap.Message, 1)
@@ -167,17 +193,25 @@ func (r *Reader) ReadMessage(uid uint32) (*emailtypes.Message, error) {
 	}()
 
 	var result *emailtypes.Message
+	var parseErr error
 	for msg := range messages {
 		emsg := r.convertMessage(msg, true)
 
 		// Extract body and Message-ID
 		if sectionData := msg.GetBody(section); sectionData != nil {
-			body, messageID, err := r.extractBody(sectionData)
-			if err == nil {
-				emsg.Body = body
-				emsg.MessageID = messageID
-				// Create preview
-				emsg.BodyPreview = r.createPreview(body, 200)
+			if msg.Size > maxMessageBytes || sectionData.Len() > maxMessageBytes {
+				parseErr = errMessageTooLarge
+			} else {
+				body, messageID, attachments, err := r.extractBody(sectionData)
+				if err != nil {
+					parseErr = err
+				} else {
+					emsg.Body = body
+					emsg.MessageID = messageID
+					emsg.Attachments = attachments
+					// Create preview
+					emsg.BodyPreview = r.createPreview(body, 200)
+				}
 			}
 		}
 
@@ -186,6 +220,9 @@ func (r *Reader) ReadMessage(uid uint32) (*emailtypes.Message, error) {
 
 	if err := <-done; err != nil {
 		return nil, fmt.Errorf("failed to fetch message: %w", err)
+	}
+	if parseErr != nil {
+		return nil, fmt.Errorf("failed to parse message: %w", parseErr)
 	}
 
 	if result == nil {
@@ -238,16 +275,11 @@ func (r *Reader) formatAddress(addr *imap.Address) string {
 	return fmt.Sprintf("%s@%s", addr.MailboxName, addr.HostName)
 }
 
-// extractBody extracts the text body and Message-ID from an email message.
-func (r *Reader) extractBody(reader io.Reader) (string, string, error) {
+// extractBody extracts the text body, Message-ID, and attachment metadata from an email message.
+func (r *Reader) extractBody(reader io.Reader) (string, string, []emailtypes.Attachment, error) {
 	mr, err := mail.CreateReader(reader)
 	if err != nil {
-		// Fallback: read raw
-		data, err := io.ReadAll(reader)
-		if err != nil {
-			return "", "", err
-		}
-		return string(data), "", nil
+		return "", "", nil, fmt.Errorf("create MIME reader: %w", err)
 	}
 
 	// Extract Message-ID from headers
@@ -258,44 +290,85 @@ func (r *Reader) extractBody(reader io.Reader) (string, string, error) {
 
 	var textBody string
 	var htmlBody string
+	var attachments []emailtypes.Attachment
 
 	for {
 		part, err := mr.NextPart()
 		if err == io.EOF {
 			break
 		} else if err != nil {
-			continue
+			return "", "", nil, fmt.Errorf("read MIME part: %w", err)
 		}
 
 		switch h := part.Header.(type) {
 		case *mail.InlineHeader:
-			contentType, _, _ := h.ContentType()
-			data, _ := io.ReadAll(part.Body)
+			contentType, _, err := h.ContentType()
+			if err != nil {
+				return "", "", nil, fmt.Errorf("read inline content type: %w", err)
+			}
+			data, err := readPart(part.Body, maxBodyBytes, errBodyTooLarge)
+			if err != nil {
+				return "", "", nil, err
+			}
 
-			if strings.HasPrefix(contentType, "text/plain") {
+			if strings.HasPrefix(strings.ToLower(contentType), "text/plain") {
 				textBody = string(data)
-			} else if strings.HasPrefix(contentType, "text/html") {
+			} else if strings.HasPrefix(strings.ToLower(contentType), "text/html") {
 				htmlBody = string(data)
 			}
+		case *mail.AttachmentHeader:
+			filename, err := h.Filename()
+			if err != nil {
+				return "", "", nil, fmt.Errorf("read attachment filename: %w", err)
+			}
+			contentType, _, err := h.ContentType()
+			if err != nil {
+				return "", "", nil, fmt.Errorf("read attachment content type: %w", err)
+			}
+			size, err := io.Copy(io.Discard, io.LimitReader(part.Body, maxAttachmentBytes+1))
+			if err != nil {
+				return "", "", nil, fmt.Errorf("read attachment: %w", err)
+			}
+			if size > maxAttachmentBytes {
+				return "", "", nil, errAttachmentTooLarge
+			}
+			attachments = append(attachments, emailtypes.Attachment{
+				Filename:    filename,
+				ContentType: contentType,
+				Size:        int(size),
+			})
 		}
 	}
 
 	// Prefer plain text, fallback to HTML
 	if textBody != "" {
-		return textBody, messageID, nil
+		return textBody, messageID, attachments, nil
 	}
 	if htmlBody != "" {
-		return r.stripHTML(htmlBody), messageID, nil
+		return r.stripHTML(htmlBody), messageID, attachments, nil
 	}
 
-	return "", messageID, nil
+	return "", messageID, attachments, nil
+}
+
+func readPart(reader io.Reader, limit int64, limitErr error) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(reader, limit+1))
+	if err != nil {
+		return nil, fmt.Errorf("read message body: %w", err)
+	}
+	if int64(len(data)) > limit {
+		return nil, limitErr
+	}
+	return data, nil
 }
 
 // stripHTML removes HTML tags and returns plain text.
 func (r *Reader) stripHTML(html string) string {
-	// Remove script and style elements
-	scriptRe := regexp.MustCompile(`(?i)<(script|style)[^>]*>[\s\S]*?</\1>`)
+	// Go's regexp engine does not support backreferences, so match each element explicitly.
+	scriptRe := regexp.MustCompile(`(?is)<script[^>]*>.*?</script>`)
 	html = scriptRe.ReplaceAllString(html, "")
+	styleRe := regexp.MustCompile(`(?is)<style[^>]*>.*?</style>`)
+	html = styleRe.ReplaceAllString(html, "")
 
 	// Replace <br>, <p> with newlines
 	brRe := regexp.MustCompile(`(?i)<br\s*/?>`)

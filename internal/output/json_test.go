@@ -248,6 +248,9 @@ func TestJSONOutput_Print_InvalidData(t *testing.T) {
 	if err == nil {
 		t.Error("Print() expected error for invalid data, got nil")
 	}
+	if err != nil && !strings.Contains(err.Error(), "failed to marshal JSON") {
+		t.Errorf("Print() error = %q, want JSON marshal context", err)
+	}
 }
 
 // BenchmarkPrint benchmarks the Print function

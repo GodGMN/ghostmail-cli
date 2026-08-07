@@ -5,9 +5,10 @@ import (
 	"crypto/tls"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/GodGMN/ghostmail-cli/internal/config"
-	"gopkg.in/gomail.v2"
+	mail "github.com/wneessen/go-mail"
 )
 
 // Sender handles email sending operations.
@@ -25,17 +26,24 @@ func (s *Sender) Send(to []string, subject, body string, opts ...SendOption) err
 	if len(to) == 0 {
 		return fmt.Errorf("at least one recipient is required")
 	}
+	if !s.config.UseTLS && !s.config.StartTLS && !s.config.AllowInsecure {
+		return fmt.Errorf("refusing to send SMTP credentials without TLS or STARTTLS (set GHOSTMAIL_SMTP_ALLOW_INSECURE=true only for an explicitly trusted plaintext server)")
+	}
 
-	m := gomail.NewMessage()
+	m := mail.NewMsg()
 
 	from := s.config.From
 	if from == "" {
 		from = s.config.Username
 	}
 
-	m.SetHeader("From", from)
-	m.SetHeader("To", to...)
-	m.SetHeader("Subject", subject)
+	if err := m.From(from); err != nil {
+		return fmt.Errorf("invalid From address: %w", err)
+	}
+	if err := m.To(to...); err != nil {
+		return fmt.Errorf("invalid To address: %w", err)
+	}
+	m.Subject(subject)
 
 	// Apply options
 	options := &sendOptions{}
@@ -45,59 +53,93 @@ func (s *Sender) Send(to []string, subject, body string, opts ...SendOption) err
 
 	// Set CC recipients
 	if len(options.cc) > 0 {
-		m.SetHeader("Cc", options.cc...)
+		if err := m.Cc(options.cc...); err != nil {
+			return fmt.Errorf("invalid Cc address: %w", err)
+		}
 	}
 
 	// Set BCC recipients
 	if len(options.bcc) > 0 {
-		m.SetHeader("Bcc", options.bcc...)
+		if err := m.Bcc(options.bcc...); err != nil {
+			return fmt.Errorf("invalid Bcc address: %w", err)
+		}
 	}
 
 	// Set In-Reply-To header for threading
 	if options.inReplyTo != "" {
-		m.SetHeader("In-Reply-To", options.inReplyTo)
+		m.SetGenHeader(mail.HeaderInReplyTo, options.inReplyTo)
 	}
 
 	// Set References header for proper threading
 	if len(options.references) > 0 {
-		m.SetHeader("References", options.references...)
+		m.SetGenHeader(mail.HeaderReferences, options.references...)
 	}
 
 	// Set custom headers
 	for key, value := range options.headers {
-		m.SetHeader(key, value)
+		m.SetGenHeader(mail.Header(key), value)
 	}
 
 	// Set body content
 	if options.htmlBody != "" {
-		m.SetBody("text/html", options.htmlBody)
+		m.SetBodyString(mail.TypeTextHTML, options.htmlBody)
 		if body != "" {
-			m.AddAlternative("text/plain", body)
+			m.AddAlternativeString(mail.TypeTextPlain, body)
 		}
 	} else {
-		m.SetBody("text/plain", body)
+		m.SetBodyString(mail.TypeTextPlain, body)
 	}
 
 	// Attach files
 	for _, attachment := range options.attachments {
-		m.Attach(attachment)
+		m.AttachFile(attachment)
 	}
 
-	// Create dialer
-	d := gomail.NewDialer(s.config.Host, s.config.Port, s.config.Username, s.config.Password)
-
-	if s.config.UseTLS {
-		d.SSL = true
-	} else if s.config.StartTLS {
-		d.TLSConfig = &tls.Config{ServerName: s.config.Host}
+	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12, ServerName: s.config.Host}
+	client, err := newMailClient(s.config, tlsConfig)
+	if err != nil {
+		return fmt.Errorf("failed to connect to SMTP server: %w", err)
 	}
 
 	// Send the email
-	if err := d.DialAndSend(m); err != nil {
+	if err := client.DialAndSend(m); err != nil {
 		return fmt.Errorf("failed to send email: %w", err)
 	}
 
 	return nil
+}
+
+func newMailClient(cfg *config.SMTPConfig, tlsConfig *tls.Config) (*mail.Client, error) {
+	tlsPolicy := mail.NoTLS
+	if cfg.StartTLS && !cfg.UseTLS {
+		tlsPolicy = mail.TLSMandatory
+	}
+
+	options := []mail.Option{
+		mail.WithPort(cfg.Port),
+		mail.WithTimeout(10 * time.Second),
+		mail.WithTLSConfig(tlsConfig),
+		mail.WithTLSPolicy(tlsPolicy),
+		mail.WithoutNoop(),
+		mail.WithoutRset(),
+	}
+	if cfg.UseTLS {
+		options = append(options, mail.WithSSL())
+	}
+	if cfg.Username != "" {
+		authTypes := []mail.SMTPAuthType{mail.SMTPAuthCramMD5}
+		if cfg.AllowInsecure && !cfg.UseTLS && !cfg.StartTLS {
+			authTypes = append(authTypes, mail.SMTPAuthPlainNoEnc, mail.SMTPAuthLoginNoEnc)
+		} else {
+			authTypes = append(authTypes, mail.SMTPAuthPlain, mail.SMTPAuthLogin)
+		}
+		options = append(options,
+			mail.WithUsername(cfg.Username),
+			mail.WithPassword(cfg.Password),
+			mail.WithOpportunisticSMTPAuth(authTypes...),
+		)
+	}
+	return mail.NewClient(cfg.Host, options...)
 }
 
 // sendOptions holds optional parameters for Send.

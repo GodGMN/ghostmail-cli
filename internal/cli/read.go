@@ -164,7 +164,7 @@ For more help, use: ghostmail read --help`,
 
 	cmd.Flags().Uint32VarP(&uid, "uid", "u", 0, "Message UID (required). Get from 'ghostmail inbox'")
 	cmd.Flags().StringVarP(&mailbox, "mailbox", "m", "", "Mailbox to read from (default: INBOX)")
-	cmd.Flags().BoolVar(&raw, "raw", false, "Show raw/preview body only (faster)")
+	cmd.Flags().BoolVar(&raw, "raw", false, "Show message preview instead of full body")
 
 	cmd.MarkFlagRequired("uid")
 

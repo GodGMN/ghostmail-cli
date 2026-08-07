@@ -7,6 +7,7 @@ Thank you for your interest in contributing to Ghostmail CLI! This document prov
 - [Development Setup](#development-setup)
 - [Coding Standards](#coding-standards)
 - [Testing](#testing)
+- [Release Process](#release-process)
 - [Pull Request Process](#pull-request-process)
 - [Commit Message Guidelines](#commit-message-guidelines)
 - [Code Review Process](#code-review-process)
@@ -17,7 +18,7 @@ Thank you for your interest in contributing to Ghostmail CLI! This document prov
 
 ### Prerequisites
 
-- Go 1.21 or later
+- Go 1.25.12 or later
 - Git
 - Make (optional, for using Makefile)
 
@@ -149,6 +150,41 @@ func TestLoadConfig(t *testing.T) {
     }
 }
 ```
+
+## Release Process
+
+Release tags are immutable public promises: create a `vX.Y.Z` tag only after its exact commit can build the published CLI. Do not move, delete, or reuse an existing tag.
+
+Before creating a release tag, use this minimal checklist from the intended release commit:
+
+```bash
+# The worktree must contain no changes, including untracked files.
+test -z "$(git status --porcelain)"
+
+# Record and validate the exact commit that will be tagged.
+release_commit="$(git rev-parse --verify HEAD^{commit})"
+git diff --check "${release_commit}^!"
+make ci-check
+go build -o /tmp/ghostmail-vX.Y.Z ./cmd/ghostmail
+
+# Do not tag if HEAD or the worktree changed during validation.
+test "$release_commit" = "$(git rev-parse --verify HEAD^{commit})"
+test -z "$(git status --porcelain)"
+```
+
+Confirm the changelog describes the release. Ensure `vX.Y.Z` does not already exist, push the validated commit, then create and push an annotated tag that explicitly names `release_commit`. The tag-triggered workflow builds and publishes the platform artifacts from that exact commit.
+
+```bash
+git fetch origin --tags
+if git rev-parse -q --verify refs/tags/vX.Y.Z >/dev/null; then exit 1; fi
+branch="$(git branch --show-current)"
+test -n "$branch"
+git push origin "$release_commit:refs/heads/$branch"
+git tag -a vX.Y.Z "$release_commit" -m "Release vX.Y.Z"
+git push origin vX.Y.Z
+```
+
+If a tag was created from an unbuildable commit, leave it unchanged and publish the fix under a new version tag. In particular, `v1.0.0` predates `cmd/ghostmail/main.go`; after validating the current commit, the corrective release should be `v1.0.1`, not a replacement `v1.0.0` tag.
 
 ## Pull Request Process
 

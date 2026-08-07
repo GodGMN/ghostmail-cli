@@ -1,14 +1,13 @@
 package config
 
 import (
-	"os"
+	"strings"
 	"testing"
 )
 
 func TestGetEnv(t *testing.T) {
 	// Test with set environment variable
-	os.Setenv("TEST_ENV_VAR", "test_value")
-	defer os.Unsetenv("TEST_ENV_VAR")
+	t.Setenv("TEST_ENV_VAR", "test_value")
 
 	value := getEnv("TEST_ENV_VAR", "default")
 	if value != "test_value" {
@@ -24,8 +23,7 @@ func TestGetEnv(t *testing.T) {
 
 func TestGetEnvAsInt(t *testing.T) {
 	// Test with valid integer
-	os.Setenv("TEST_INT_VAR", "42")
-	defer os.Unsetenv("TEST_INT_VAR")
+	t.Setenv("TEST_INT_VAR", "42")
 
 	value := getEnvAsInt("TEST_INT_VAR", 0)
 	if value != 42 {
@@ -39,8 +37,7 @@ func TestGetEnvAsInt(t *testing.T) {
 	}
 
 	// Test with invalid integer
-	os.Setenv("TEST_INVALID_INT", "not_a_number")
-	defer os.Unsetenv("TEST_INVALID_INT")
+	t.Setenv("TEST_INVALID_INT", "not_a_number")
 
 	value = getEnvAsInt("TEST_INVALID_INT", 50)
 	if value != 50 {
@@ -65,10 +62,7 @@ func TestGetEnvAsBool(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.value != "" {
-				os.Setenv("TEST_BOOL_VAR", tt.value)
-				defer os.Unsetenv("TEST_BOOL_VAR")
-			}
+			t.Setenv("TEST_BOOL_VAR", tt.value)
 			got := getEnvAsBool("TEST_BOOL_VAR", tt.defaultValue)
 			if got != tt.want {
 				t.Errorf("getEnvAsBool() = %v, want %v", got, tt.want)
@@ -78,35 +72,23 @@ func TestGetEnvAsBool(t *testing.T) {
 }
 
 func TestLoad(t *testing.T) {
-	// Clean environment before test
-	cleanEnv := []string{
+	envKeys := []string{
 		"GHOSTMAIL_SMTP_HOST", "GHOSTMAIL_SMTP_PORT", "GHOSTMAIL_SMTP_USERNAME",
-		"GHOSTMAIL_SMTP_PASSWORD", "GHOSTMAIL_SMTP_FROM",
+		"GHOSTMAIL_SMTP_PASSWORD", "GHOSTMAIL_SMTP_FROM", "GHOSTMAIL_SMTP_USE_TLS", "GHOSTMAIL_SMTP_STARTTLS", "GHOSTMAIL_SMTP_ALLOW_INSECURE",
 		"GHOSTMAIL_IMAP_HOST", "GHOSTMAIL_IMAP_PORT", "GHOSTMAIL_IMAP_USERNAME",
-		"GHOSTMAIL_IMAP_PASSWORD", "GHOSTMAIL_IMAP_MAILBOX",
+		"GHOSTMAIL_IMAP_PASSWORD", "GHOSTMAIL_IMAP_MAILBOX", "GHOSTMAIL_IMAP_USE_TLS", "GHOSTMAIL_IMAP_STARTTLS", "GHOSTMAIL_IMAP_ALLOW_INSECURE",
 	}
-
-	// Save and clear environment
-	saved := make(map[string]string)
-	for _, key := range cleanEnv {
-		if val := os.Getenv(key); val != "" {
-			saved[key] = val
-			os.Unsetenv(key)
-		}
+	for _, key := range envKeys {
+		t.Setenv(key, "")
 	}
-	defer func() {
-		for key, val := range saved {
-			os.Setenv(key, val)
-		}
-	}()
 
 	// Set test values
-	os.Setenv("GHOSTMAIL_SMTP_HOST", "smtp.example.com")
-	os.Setenv("GHOSTMAIL_SMTP_USERNAME", "test@example.com")
-	os.Setenv("GHOSTMAIL_SMTP_PASSWORD", "testpass")
-	os.Setenv("GHOSTMAIL_IMAP_HOST", "imap.example.com")
-	os.Setenv("GHOSTMAIL_IMAP_USERNAME", "test@example.com")
-	os.Setenv("GHOSTMAIL_IMAP_PASSWORD", "testpass")
+	t.Setenv("GHOSTMAIL_SMTP_HOST", "smtp.example.com")
+	t.Setenv("GHOSTMAIL_SMTP_USERNAME", "test@example.com")
+	t.Setenv("GHOSTMAIL_SMTP_PASSWORD", "testpass")
+	t.Setenv("GHOSTMAIL_IMAP_HOST", "imap.example.com")
+	t.Setenv("GHOSTMAIL_IMAP_USERNAME", "test@example.com")
+	t.Setenv("GHOSTMAIL_IMAP_PASSWORD", "testpass")
 
 	cfg, err := Load()
 	if err != nil {
@@ -133,6 +115,27 @@ func TestLoad(t *testing.T) {
 	}
 }
 
+func TestLoadOverridesAndInvalidValues(t *testing.T) {
+	t.Setenv("GHOSTMAIL_SMTP_PORT", "2525")
+	t.Setenv("GHOSTMAIL_SMTP_USE_TLS", "true")
+	t.Setenv("GHOSTMAIL_SMTP_STARTTLS", "false")
+	t.Setenv("GHOSTMAIL_IMAP_PORT", "not-a-port")
+	t.Setenv("GHOSTMAIL_IMAP_USE_TLS", "not-a-bool")
+	t.Setenv("GHOSTMAIL_IMAP_MAILBOX", "Archive")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if cfg.SMTP.Port != 2525 || !cfg.SMTP.UseTLS || cfg.SMTP.StartTLS {
+		t.Errorf("SMTP = %+v, want overridden port and TLS values", cfg.SMTP)
+	}
+	if cfg.IMAP.Port != 993 || !cfg.IMAP.UseTLS || cfg.IMAP.Mailbox != "Archive" {
+		t.Errorf("IMAP = %+v, want defaults for invalid values and overridden mailbox", cfg.IMAP)
+	}
+}
+
 func TestValidateSMTP(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -146,8 +149,23 @@ func TestValidateSMTP(t *testing.T) {
 					Host:     "smtp.example.com",
 					Username: "test@example.com",
 					Password: "password",
+					StartTLS: true,
 				},
 			},
+			wantErr: false,
+		},
+		{
+			name: "plaintext requires explicit opt-in",
+			config: Config{SMTP: SMTPConfig{
+				Host: "smtp.example.com", Username: "test@example.com", Password: "password",
+			}},
+			wantErr: true,
+		},
+		{
+			name: "explicit plaintext opt-in",
+			config: Config{SMTP: SMTPConfig{
+				Host: "smtp.example.com", Username: "test@example.com", Password: "password", AllowInsecure: true,
+			}},
 			wantErr: false,
 		},
 		{
@@ -191,6 +209,9 @@ func TestValidateSMTP(t *testing.T) {
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ValidateSMTP() error = %v, wantErr %v", err, tt.wantErr)
 			}
+			if tt.wantErr && !strings.Contains(err.Error(), "GHOSTMAIL_SMTP_") {
+				t.Errorf("ValidateSMTP() error = %q, want environment variable name", err)
+			}
 		})
 	}
 }
@@ -208,8 +229,23 @@ func TestValidateIMAP(t *testing.T) {
 					Host:     "imap.example.com",
 					Username: "test@example.com",
 					Password: "password",
+					UseTLS:   true,
 				},
 			},
+			wantErr: false,
+		},
+		{
+			name: "plaintext requires explicit opt-in",
+			config: Config{IMAP: IMAPConfig{
+				Host: "imap.example.com", Username: "test@example.com", Password: "password",
+			}},
+			wantErr: true,
+		},
+		{
+			name: "STARTTLS is secure",
+			config: Config{IMAP: IMAPConfig{
+				Host: "imap.example.com", Username: "test@example.com", Password: "password", StartTLS: true,
+			}},
 			wantErr: false,
 		},
 		{
@@ -252,6 +288,9 @@ func TestValidateIMAP(t *testing.T) {
 			err := tt.config.ValidateIMAP()
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ValidateIMAP() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr && !strings.Contains(err.Error(), "GHOSTMAIL_IMAP_") {
+				t.Errorf("ValidateIMAP() error = %q, want environment variable name", err)
 			}
 		})
 	}

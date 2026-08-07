@@ -15,23 +15,26 @@ type Config struct {
 
 // SMTPConfig holds SMTP server configuration.
 type SMTPConfig struct {
-	Host     string `json:"host"`
-	Port     int    `json:"port"`
-	Username string `json:"username"`
-	Password string `json:"password"`
-	UseTLS   bool   `json:"use_tls"`
-	StartTLS bool   `json:"start_tls"`
-	From     string `json:"from"`
+	Host          string `json:"host"`
+	Port          int    `json:"port"`
+	Username      string `json:"username"`
+	Password      string `json:"password"`
+	UseTLS        bool   `json:"use_tls"`
+	StartTLS      bool   `json:"start_tls"`
+	AllowInsecure bool   `json:"allow_insecure"`
+	From          string `json:"from"`
 }
 
 // IMAPConfig holds IMAP server configuration.
 type IMAPConfig struct {
-	Host     string `json:"host"`
-	Port     int    `json:"port"`
-	Username string `json:"username"`
-	Password string `json:"password"`
-	UseTLS   bool   `json:"use_tls"`
-	Mailbox  string `json:"mailbox"`
+	Host          string `json:"host"`
+	Port          int    `json:"port"`
+	Username      string `json:"username"`
+	Password      string `json:"password"`
+	UseTLS        bool   `json:"use_tls"`
+	StartTLS      bool   `json:"start_tls"`
+	AllowInsecure bool   `json:"allow_insecure"`
+	Mailbox       string `json:"mailbox"`
 }
 
 // Load loads configuration from environment variables.
@@ -44,7 +47,9 @@ func Load() (*Config, error) {
 			Password: getEnv("GHOSTMAIL_SMTP_PASSWORD", ""),
 			UseTLS:   getEnvAsBool("GHOSTMAIL_SMTP_USE_TLS", false),
 			StartTLS: getEnvAsBool("GHOSTMAIL_SMTP_STARTTLS", true),
-			From:     getEnv("GHOSTMAIL_SMTP_FROM", ""),
+			// GHOSTMAIL_SMTP_ALLOW_INSECURE permits plaintext credentials. Do not use in production.
+			AllowInsecure: getEnvAsBool("GHOSTMAIL_SMTP_ALLOW_INSECURE", false),
+			From:          getEnv("GHOSTMAIL_SMTP_FROM", ""),
 		},
 		IMAP: IMAPConfig{
 			Host:     getEnv("GHOSTMAIL_IMAP_HOST", ""),
@@ -52,7 +57,10 @@ func Load() (*Config, error) {
 			Username: getEnv("GHOSTMAIL_IMAP_USERNAME", ""),
 			Password: getEnv("GHOSTMAIL_IMAP_PASSWORD", ""),
 			UseTLS:   getEnvAsBool("GHOSTMAIL_IMAP_USE_TLS", true),
-			Mailbox:  getEnv("GHOSTMAIL_IMAP_MAILBOX", "INBOX"),
+			StartTLS: getEnvAsBool("GHOSTMAIL_IMAP_STARTTLS", false),
+			// GHOSTMAIL_IMAP_ALLOW_INSECURE permits plaintext credentials. Do not use in production.
+			AllowInsecure: getEnvAsBool("GHOSTMAIL_IMAP_ALLOW_INSECURE", false),
+			Mailbox:       getEnv("GHOSTMAIL_IMAP_MAILBOX", "INBOX"),
 		},
 	}
 
@@ -70,6 +78,9 @@ func (c *Config) ValidateSMTP() error {
 	if c.SMTP.Password == "" {
 		return fmt.Errorf("SMTP password is required (set GHOSTMAIL_SMTP_PASSWORD)")
 	}
+	if !c.SMTP.UseTLS && !c.SMTP.StartTLS && !c.SMTP.AllowInsecure {
+		return fmt.Errorf("SMTP requires TLS or STARTTLS (set GHOSTMAIL_SMTP_USE_TLS=true or GHOSTMAIL_SMTP_STARTTLS=true; GHOSTMAIL_SMTP_ALLOW_INSECURE=true permits plaintext credentials and is unsafe)")
+	}
 	return nil
 }
 
@@ -83,6 +94,9 @@ func (c *Config) ValidateIMAP() error {
 	}
 	if c.IMAP.Password == "" {
 		return fmt.Errorf("IMAP password is required (set GHOSTMAIL_IMAP_PASSWORD)")
+	}
+	if !c.IMAP.UseTLS && !c.IMAP.StartTLS && !c.IMAP.AllowInsecure {
+		return fmt.Errorf("IMAP requires TLS or STARTTLS (set GHOSTMAIL_IMAP_USE_TLS=true or GHOSTMAIL_IMAP_STARTTLS=true; GHOSTMAIL_IMAP_ALLOW_INSECURE=true permits plaintext credentials and is unsafe)")
 	}
 	return nil
 }

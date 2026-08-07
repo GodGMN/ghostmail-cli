@@ -2,7 +2,7 @@
 
 A lightweight, fast command-line email client for sending and reading emails via SMTP/IMAP. Built with Go for cross-platform compatibility.
 
-[![Go Version](https://img.shields.io/badge/go-1.21+-blue.svg)](https://golang.org)
+[![Go Version](https://img.shields.io/badge/go-1.25.12%2B-blue.svg)](https://go.dev)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 ## Features
@@ -15,7 +15,7 @@ A lightweight, fast command-line email client for sending and reading emails via
   - Body from file or command line
 - 📥 **Read emails** via IMAP with:
   - Mailbox listing with filters (unread, limit)
-  - Full message reading with body and attachments
+  - Full message reading with body, message metadata, and attachment metadata
   - JSON output for scripting
 - 🔒 **Environment-based configuration** - no credentials stored in code
 - 🤖 **JSON output mode** for easy integration with scripts and agents
@@ -30,6 +30,7 @@ A lightweight, fast command-line email client for sending and reading emails via
   - [send](#send)
   - [inbox](#inbox)
   - [read](#read)
+  - [reply](#reply)
   - [config](#config)
 - [Environment Variables](#environment-variables)
 - [Examples](#examples)
@@ -43,32 +44,17 @@ A lightweight, fast command-line email client for sending and reading emails via
 ### From Source
 
 ```bash
-go install github.com/user/ghostmail-cli/cmd/ghostmail@latest
+go install github.com/GodGMN/ghostmail-cli/cmd/ghostmail@latest
 ```
 
 ### Pre-built Binaries
 
-Download the latest release for your platform from the [Releases](https://github.com/user/ghostmail-cli/releases) page.
-
-```bash
-# Linux
-curl -L https://github.com/user/ghostmail-cli/releases/latest/download/ghostmail-linux-amd64 -o ghostmail
-chmod +x ghostmail
-sudo mv ghostmail /usr/local/bin/
-
-# macOS
-curl -L https://github.com/user/ghostmail-cli/releases/latest/download/ghostmail-darwin-amd64 -o ghostmail
-chmod +x ghostmail
-sudo mv ghostmail /usr/local/bin/
-
-# Windows (PowerShell)
-Invoke-WebRequest -Uri https://github.com/user/ghostmail-cli/releases/latest/download/ghostmail-windows-amd64.exe -OutFile ghostmail.exe
-```
+Pre-built binaries are not currently published. Install or build from source instead.
 
 ### Building from Source
 
 ```bash
-git clone https://github.com/user/ghostmail-cli.git
+git clone https://github.com/GodGMN/ghostmail-cli.git
 cd ghostmail-cli
 make build
 ```
@@ -240,7 +226,7 @@ ghostmail read --uid <UID>
 |------|-------|-------------|
 | `--uid` | `-u` | Message UID (required) |
 | `--mailbox` | `-m` | Mailbox to read from | INBOX |
-| `--raw` | | Show raw/preview only (faster) |
+| `--raw` | | Show the message preview instead of the full body |
 
 **Examples:**
 
@@ -260,6 +246,23 @@ ghostmail read --uid 12345 --json
 # Extract subject using jq
 ghostmail read --uid 12345 --json | jq -r '.message.subject'
 ```
+
+### reply
+
+Reply to an email by UID. The original message is quoted and threading headers are set by default.
+
+```bash
+ghostmail reply --uid 12345 --body "Thanks for the update"
+```
+
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--uid` | `-u` | Message UID to reply to (required) |
+| `--body` | `-b` | Reply body text (or use `--body-file`) |
+| `--body-file` | | Read reply body from file |
+| `--mailbox` | `-m` | Mailbox containing the message |
+| `--all` | `-a` | Include the original To and CC recipients |
+| `--no-quote` | | Do not quote the original message |
 
 ### config
 
@@ -291,6 +294,7 @@ All configuration is done via environment variables with the `GHOSTMAIL_*` prefi
 | `GHOSTMAIL_SMTP_FROM` | Default sender email | (same as username) |
 | `GHOSTMAIL_SMTP_USE_TLS` | Use TLS (instead of STARTTLS) | `false` |
 | `GHOSTMAIL_SMTP_STARTTLS` | Use STARTTLS | `true` |
+| `GHOSTMAIL_SMTP_ALLOW_INSECURE` | Allow plaintext credentials; unsafe | `false` |
 
 ### IMAP Variables
 
@@ -301,6 +305,8 @@ All configuration is done via environment variables with the `GHOSTMAIL_*` prefi
 | `GHOSTMAIL_IMAP_USERNAME` | IMAP username | (required) |
 | `GHOSTMAIL_IMAP_PASSWORD` | IMAP password | (required) |
 | `GHOSTMAIL_IMAP_USE_TLS` | Use TLS for IMAP | `true` |
+| `GHOSTMAIL_IMAP_STARTTLS` | Use STARTTLS for IMAP | `false` |
+| `GHOSTMAIL_IMAP_ALLOW_INSECURE` | Allow plaintext credentials; unsafe | `false` |
 | `GHOSTMAIL_IMAP_MAILBOX` | Default mailbox | `INBOX` |
 
 ### Example `.env` File
@@ -493,9 +499,8 @@ Error: attachment file.pdf is too large: 15.2MB (max 10MB)
 ### IMAP Connection Issues
 
 - Verify IMAP is enabled in your email provider settings
-- Some providers require "Less Secure Apps" to be enabled
+- Use an app password when your provider requires one; Gmail requires an app password with 2-Step Verification enabled
 - Check firewall settings
-- For Gmail: Use App Password instead of regular password
 
 ### Debug Mode
 
@@ -514,6 +519,7 @@ ghostmail --help
 ghostmail send --help
 ghostmail inbox --help
 ghostmail read --help
+ghostmail reply --help
 ghostmail config --help
 ```
 

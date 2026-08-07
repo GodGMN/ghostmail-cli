@@ -99,8 +99,11 @@ EXAMPLE:
 TIP: If configuration is missing, run 'ghostmail config example' to see
 what variables need to be set.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// This will be implemented to check config
 			fmt.Println("Checking configuration...")
+			mailbox := os.Getenv("GHOSTMAIL_IMAP_MAILBOX")
+			if mailbox == "" {
+				mailbox = "INBOX (default)"
+			}
 
 			vars := []struct {
 				name  string
@@ -117,7 +120,7 @@ what variables need to be set.`,
 				{"GHOSTMAIL_IMAP_PORT", os.Getenv("GHOSTMAIL_IMAP_PORT"), false, true},
 				{"GHOSTMAIL_IMAP_USERNAME", os.Getenv("GHOSTMAIL_IMAP_USERNAME"), false, true},
 				{"GHOSTMAIL_IMAP_PASSWORD", maskPassword(os.Getenv("GHOSTMAIL_IMAP_PASSWORD")), false, true},
-				{"GHOSTMAIL_IMAP_MAILBOX", os.Getenv("GHOSTMAIL_IMAP_MAILBOX"), false, true},
+				{"GHOSTMAIL_IMAP_MAILBOX", mailbox, false, true},
 			}
 
 			fmt.Println("\nSMTP Configuration:")
@@ -156,6 +159,7 @@ what variables need to be set.`,
 			} else {
 				fmt.Println("✗ Some required configuration is missing")
 				fmt.Println("\nRun 'ghostmail config example' to see an example configuration")
+				return fmt.Errorf("required configuration is missing")
 			}
 
 			return nil
