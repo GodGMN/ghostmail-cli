@@ -7,7 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
-## [1.0.3] - 2026-08-07
+## [1.0.4] - 2026-08-07
+
+### Fixed
+- Corrective release: the `v1.0.3` release run aborted at the keyless signing
+  step. Newer cosign ignores the deprecated `--output-signature` /
+  `--output-certificate` flags under its default bundle format and fails with
+  an empty bundle path. Signing now emits a `--bundle` per binary and the
+  release notes document the matching `cosign verify-blob --bundle` command.
+  `v1.0.3` published no release artifacts and remains immutable for history;
+  `v1.0.4` is the corrective release.
+- `ghostmail config check` now exits unsuccessfully when required configuration is missing.
+- IMAP connections now apply a 15s connect/greeting timeout and a 60s per-command timeout, so a stalled server can no longer hang the CLI indefinitely.
+- Full message reads no longer request `BODY[]` alongside a size-capped partial fetch, avoiding a double transfer of the message body.
+- `reply --all` now strips display names before comparing/skipping the original sender and de-duplicating CC recipients.
+- SMTP and IMAP configuration validation now rejects ports outside the 1-65535 range.
 
 ### Added
 - IMAP message reads now include attachment filename, content type, and decoded size metadata.
@@ -15,15 +29,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fuzz targets for the MIME/text parsers (`FuzzExtractBody`, `FuzzStripHTML`, `FuzzDecodeHeader`, `FuzzSafeSlicePrefix`, `FuzzFormatQuotedReply`), run for a short duration in CI.
 - CI now enforces a total coverage threshold (80%) and fails the build if coverage drops below it.
 - Dependabot now groups dependency updates and uses `increase-if-necessary` for Go modules to reduce update churn.
-
-### Fixed
-- Restored the `cmd/ghostmail` executable entry point required to build release artifacts.
-- `ghostmail config check` now exits unsuccessfully when required configuration is missing.
-- The `v1.0.0` tag predates the `cmd/ghostmail` entry point and cannot produce a release artifact. It remains immutable for history and must not be treated as an installable release; `v1.0.1` is the corrective release.
-- IMAP connections now apply a 15s connect/greeting timeout and a 60s per-command timeout, so a stalled server can no longer hang the CLI indefinitely.
-- Full message reads no longer request `BODY[]` alongside a size-capped partial fetch, avoiding a double transfer of the message body.
-- `reply --all` now strips display names before comparing/skipping the original sender and de-duplicating CC recipients.
-- SMTP and IMAP configuration validation now rejects ports outside the 1-65535 range.
 
 ### Changed
 - The project and release CI now require patched Go 1.25.12; direct and indirect Go dependencies were updated, including migration to maintained `github.com/wneessen/go-mail`.
@@ -85,7 +90,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > **Note:** The `v1.0.0` tag predates `cmd/ghostmail/main.go` and produces no
 > installable binary. Do not `go install ...@v1.0.0`. Use `v1.0.1` or later.
 
-[1.0.3]: https://github.com/GodGMN/ghostmail-cli/releases/tag/v1.0.3
+[1.0.4]: https://github.com/GodGMN/ghostmail-cli/releases/tag/v1.0.4
 [1.0.2]: https://github.com/GodGMN/ghostmail-cli/releases/tag/v1.0.2
 [1.0.1]: https://github.com/GodGMN/ghostmail-cli/releases/tag/v1.0.1
 [1.0.0]: https://github.com/GodGMN/ghostmail-cli/releases/tag/v1.0.0

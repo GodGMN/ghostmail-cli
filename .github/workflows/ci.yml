@@ -213,12 +213,13 @@ jobs:
         run: |
           set -euo pipefail
           # Keyless signing issues a short-lived certificate via the workflow's
-          # OIDC identity; the .sig + .pem pairs let anyone verify provenance with
-          # `cosign verify-blob --certificate-identity ... --certificate-oidc-issuer https://token.actions.githubusercontent.com`.
+          # OIDC identity; the .bundle pairs let anyone verify provenance with
+          # `cosign verify-blob --bundle ... --certificate-identity ... --certificate-oidc-issuer https://token.actions.githubusercontent.com`.
+          # NOTE: --output-signature/--output-certificate are deprecated and
+          # ignored under cosign's default bundle format; --bundle is required.
           for bin in dist/ghostmail-*; do
             cosign sign-blob --yes \
-              --output-signature "${bin}.sig" \
-              --output-certificate "${bin}.pem" \
+              --bundle "${bin}.bundle" \
               "${bin}"
           done
 
@@ -271,7 +272,7 @@ jobs:
         uses: softprops/action-gh-release@6cbd405e2c4e67a21c47fa9e383d020e4e28b836 # v2.3.3
         with:
           # A single glob uploads every dist artifact that starts with
-          # `ghostmail-`: the binaries, their .sig/.pem provenance pairs, the
+          # `ghostmail-`: the binaries, their .bundle provenance files, the
           # checksum file, and the SBOM. Do NOT also list checksums/SBOM
           # explicitly — overlapping the glob makes action-gh-release upload
           # them twice and the second attempt fails with
@@ -287,8 +288,7 @@ jobs:
             ```bash
             # Verify a binary's signature
             cosign verify-blob \
-              --certificate ghostmail-linux-amd64.pem \
-              --signature ghostmail-linux-amd64.sig \
+              --bundle ghostmail-linux-amd64.bundle \
               --certificate-identity https://github.com/GodGMN/ghostmail-cli/.github/workflows/ci.yml@refs/tags/${{ github.ref_name }} \
               --certificate-oidc-issuer https://token.actions.githubusercontent.com \
               ghostmail-linux-amd64
