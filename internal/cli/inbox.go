@@ -7,13 +7,28 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/fatih/color"
+	"github.com/spf13/cobra"
+
 	"github.com/GodGMN/ghostmail-cli/internal/config"
 	emailinternal "github.com/GodGMN/ghostmail-cli/internal/email"
 	"github.com/GodGMN/ghostmail-cli/internal/output"
 	emailtypes "github.com/GodGMN/ghostmail-cli/pkg/email"
-	"github.com/fatih/color"
-	"github.com/spf13/cobra"
 )
+
+// messageLister is the subset of the email reader that the inbox command
+// needs. Defining it here lets tests inject a fake reader without standing up
+// an IMAP server, exercising the command's output-formatting branches.
+type messageLister interface {
+	ListMessages(limit int, unreadOnly bool) ([]emailtypes.Message, error)
+}
+
+// inboxReaderFactory builds a messageLister from an IMAP config. It is a
+// package-level seam so tests can replace it; production callers use the real
+// email reader.
+var inboxReaderFactory = func(cfg *config.IMAPConfig) messageLister {
+	return emailinternal.NewReader(cfg)
+}
 
 func newInboxCmd() *cobra.Command {
 	var (
@@ -67,11 +82,14 @@ For more help, use: ghostmail inbox --help`,
 			}
 
 			// Fetch messages
-			reader := emailinternal.NewReader(&cfg.IMAP)
+			reader := inboxReaderFactory(&cfg.IMAP)
+			debugf("connecting to IMAP server %s:%d (mailbox=%q, limit=%d, unread=%t)",
+				cfg.IMAP.Host, cfg.IMAP.Port, cfg.IMAP.Mailbox, limit, unreadOnly)
 			messages, err := reader.ListMessages(limit, unreadOnly)
 			if err != nil {
 				return handleError(fmt.Errorf("%w. Use --help for usage info", err))
 			}
+			debugf("fetched %d messages", len(messages))
 
 			// Output
 			if jsonOutput {
@@ -131,12 +149,23 @@ For more help, use: ghostmail inbox --help`,
 	return cmd
 }
 
-// truncate truncates a string to max length.
+// truncate shortens s to at most maxLen display characters, appending an
+// ellipsis when it is shortened. It operates on runes rather than bytes so
+// multibyte UTF-8 text is never split mid-codepoint.
 func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
+	if maxLen <= 0 {
+		return ""
+	}
+	runes := []rune(s)
+	if len(runes) <= maxLen {
 		return s
 	}
-	return s[:maxLen-3] + "..."
+	// Reserve room for the ellipsis; if the budget is too small to fit both a
+	// meaningful prefix and "...", return as many whole runes as we can.
+	if maxLen <= 3 {
+		return string(runes[:maxLen])
+	}
+	return string(runes[:maxLen-3]) + "..."
 }
 
 // formatDate formats a date for display.

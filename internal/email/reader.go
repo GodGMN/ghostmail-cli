@@ -3,25 +3,88 @@ package email
 
 import (
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net"
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
-	"github.com/GodGMN/ghostmail-cli/internal/config"
-	emailtypes "github.com/GodGMN/ghostmail-cli/pkg/email"
 	"github.com/emersion/go-imap"
 	"github.com/emersion/go-imap/client"
 	"github.com/emersion/go-message/mail"
+
+	"github.com/GodGMN/ghostmail-cli/internal/config"
+	emailtypes "github.com/GodGMN/ghostmail-cli/pkg/email"
 )
+
+// wordDecoder decodes RFC 2047 encoded-words (e.g. =?utf-8?B?...?=) found in
+// header fields such as display names. It is safe to share across goroutines:
+// mime.WordDecoder holds no mutable state.
+var wordDecoder = newMimeWordDecoder()
+
+func newMimeWordDecoder() *mime.WordDecoder {
+	d := mime.WordDecoder{}
+	return &d
+}
+
+// decodeHeader decodes an RFC 2047 encoded header value. It returns the input
+// unchanged if decoding fails, so malformed encoded-words never corrupt output.
+func decodeHeader(s string) string {
+	if !strings.Contains(s, "=?") {
+		return s
+	}
+	if decoded, err := wordDecoder.DecodeHeader(s); err == nil {
+		return decoded
+	}
+	return s
+}
+
+// safeSlicePrefix returns the longest prefix of s that is at most maxBytes long
+// and ends on a UTF-8 rune boundary. It never splits a multibyte sequence, so
+// the result is always valid UTF-8 even when maxBytes lands mid-rune.
+func safeSlicePrefix(s string, maxBytes int) string {
+	if maxBytes <= 0 || s == "" {
+		return ""
+	}
+	if len(s) <= maxBytes {
+		return s
+	}
+	end := maxBytes
+	// Back up to the nearest rune-start byte so we don't truncate inside a
+	// multibyte codepoint.
+	for end > 0 && !utf8.RuneStart(s[end]) {
+		end--
+	}
+	return s[:end]
+}
+
+// safeSliceRunes returns the first n runes of s. Use this instead of s[:n]
+// whenever n is a display-width budget measured in characters, since byte
+// slicing would corrupt multibyte text.
+func safeSliceRunes(s string, n int) string {
+	if n <= 0 {
+		return ""
+	}
+	runes := []rune(s)
+	if len(runes) <= n {
+		return s
+	}
+	return string(runes[:n])
+}
 
 const (
 	maxMessageBytes    = 10 << 20
 	maxBodyBytes       = 2 << 20
 	maxAttachmentBytes = 8 << 20
+	// previewMessageBytes is the maximum number of body bytes fetched in
+	// preview (--raw) mode. It is intentionally small so that listing a
+	// preview is cheap even when the full message is very large.
+	previewMessageBytes = 4 << 10
 )
 
 var (
@@ -33,11 +96,27 @@ var (
 // Reader handles email reading operations via IMAP.
 type Reader struct {
 	config *config.IMAPConfig
+	// tlsRoots, when non-nil, overrides the system root certificate pool used
+	// to verify the IMAP server. It is intentionally unexported so only tests
+	// in this package can inject a custom trust store; production callers rely
+	// on the host's root CA set, which is the secure default.
+	tlsRoots *x509.CertPool
 }
 
 // NewReader creates a new email reader.
 func NewReader(cfg *config.IMAPConfig) *Reader {
 	return &Reader{config: cfg}
+}
+
+// tlsConfig returns the TLS configuration for IMAP connections. When tlsRoots
+// is set (tests only), it is used as the trust store; otherwise the system
+// roots are used, matching the production default.
+func (r *Reader) tlsConfig() *tls.Config {
+	cfg := &tls.Config{MinVersion: tls.VersionTLS12, ServerName: r.config.Host}
+	if r.tlsRoots != nil {
+		cfg.RootCAs = r.tlsRoots
+	}
+	return cfg
 }
 
 // Connect establishes a connection to the IMAP server.
@@ -51,7 +130,7 @@ func (r *Reader) Connect() (*client.Client, error) {
 	var err error
 
 	if r.config.UseTLS {
-		c, err = client.DialTLS(addr, &tls.Config{MinVersion: tls.VersionTLS12, ServerName: r.config.Host})
+		c, err = client.DialTLS(addr, r.tlsConfig())
 	} else {
 		c, err = client.Dial(addr)
 	}
@@ -60,7 +139,7 @@ func (r *Reader) Connect() (*client.Client, error) {
 		return nil, fmt.Errorf("failed to connect to IMAP server: %w", err)
 	}
 	if r.config.StartTLS && !r.config.UseTLS {
-		if err := c.StartTLS(&tls.Config{MinVersion: tls.VersionTLS12, ServerName: r.config.Host}); err != nil {
+		if err := c.StartTLS(r.tlsConfig()); err != nil {
 			c.Logout()
 			return nil, fmt.Errorf("failed to start IMAP TLS: %w", err)
 		}
@@ -144,7 +223,7 @@ func (r *Reader) ListMessages(limit int, unreadOnly bool) ([]emailtypes.Message,
 
 	var result []emailtypes.Message
 	for msg := range messages {
-		emsg := r.convertMessage(msg, false)
+		emsg := r.convertMessage(msg)
 		result = append(result, emsg)
 	}
 
@@ -195,19 +274,20 @@ func (r *Reader) ReadMessage(uid uint32) (*emailtypes.Message, error) {
 	var result *emailtypes.Message
 	var parseErr error
 	for msg := range messages {
-		emsg := r.convertMessage(msg, true)
+		emsg := r.convertMessage(msg)
 
 		// Extract body and Message-ID
 		if sectionData := msg.GetBody(section); sectionData != nil {
 			if msg.Size > maxMessageBytes || sectionData.Len() > maxMessageBytes {
 				parseErr = errMessageTooLarge
 			} else {
-				body, messageID, attachments, err := r.extractBody(sectionData)
+				body, messageID, references, attachments, err := r.extractBody(sectionData)
 				if err != nil {
 					parseErr = err
 				} else {
 					emsg.Body = body
 					emsg.MessageID = messageID
+					emsg.References = references
 					emsg.Attachments = attachments
 					// Create preview
 					emsg.BodyPreview = r.createPreview(body, 200)
@@ -232,8 +312,65 @@ func (r *Reader) ReadMessage(uid uint32) (*emailtypes.Message, error) {
 	return result, nil
 }
 
-// convertMessage converts an IMAP message to our Message type.
-func (r *Reader) convertMessage(msg *imap.Message, fullBody bool) emailtypes.Message {
+// ReadMessagePreview retrieves only envelope metadata and a short body prefix
+// for a message. It is the fast path used by --raw: it never fetches the full
+// message body and therefore avoids full MIME parsing. A best-effort preview is
+// produced from the prefix; MIME decoding errors are tolerated so that headers
+// are still returned.
+func (r *Reader) ReadMessagePreview(uid uint32) (*emailtypes.Message, error) {
+	c, err := r.Connect()
+	if err != nil {
+		return nil, err
+	}
+	defer c.Logout()
+
+	if _, err := c.Select(r.config.Mailbox, false); err != nil {
+		return nil, fmt.Errorf("failed to select mailbox: %w", err)
+	}
+
+	seqSet := new(imap.SeqSet)
+	seqSet.AddNum(uid)
+
+	items := []imap.FetchItem{
+		imap.FetchUid,
+		imap.FetchEnvelope,
+		imap.FetchFlags,
+		imap.FetchRFC822Size,
+	}
+	section := &imap.BodySectionName{Peek: true, Partial: []int{0, previewMessageBytes}}
+	items = append(items, section.FetchItem())
+
+	messages := make(chan *imap.Message, 1)
+	done := make(chan error, 1)
+	go func() {
+		done <- c.UidFetch(seqSet, items, messages)
+	}()
+
+	var result *emailtypes.Message
+	for msg := range messages {
+		emsg := r.convertMessage(msg)
+		if sectionData := msg.GetBody(section); sectionData != nil {
+			// Preview mode tolerates parse failures: the envelope is still useful.
+			if body, _, _, _, err := r.extractBody(sectionData); err == nil {
+				emsg.BodyPreview = r.createPreview(body, 200)
+			}
+		}
+		result = &emsg
+	}
+
+	if err := <-done; err != nil {
+		return nil, fmt.Errorf("failed to fetch message: %w", err)
+	}
+	if result == nil {
+		return nil, fmt.Errorf("message not found")
+	}
+	return result, nil
+}
+
+// convertMessage converts an IMAP message envelope into our Message type. It
+// only reads envelope metadata; body extraction is handled separately by the
+// caller so that the preview and full-fetch paths can share this logic.
+func (r *Reader) convertMessage(msg *imap.Message) emailtypes.Message {
 	emsg := emailtypes.Message{
 		UID:    msg.Uid,
 		SeqNum: msg.SeqNum,
@@ -264,28 +401,39 @@ func (r *Reader) convertMessage(msg *imap.Message, fullBody bool) emailtypes.Mes
 	return emsg
 }
 
-// formatAddress formats an IMAP address.
+// formatAddress formats an IMAP address. Display names are RFC 2047-decoded so
+// that internationalized (=?utf-8?B?...?=) senders render as readable text
+// instead of raw encoded-words.
 func (r *Reader) formatAddress(addr *imap.Address) string {
 	if addr == nil {
 		return ""
 	}
 	if addr.PersonalName != "" {
-		return fmt.Sprintf("%s <%s@%s>", addr.PersonalName, addr.MailboxName, addr.HostName)
+		return fmt.Sprintf("%s <%s@%s>", decodeHeader(addr.PersonalName), addr.MailboxName, addr.HostName)
 	}
 	return fmt.Sprintf("%s@%s", addr.MailboxName, addr.HostName)
 }
 
-// extractBody extracts the text body, Message-ID, and attachment metadata from an email message.
-func (r *Reader) extractBody(reader io.Reader) (string, string, []emailtypes.Attachment, error) {
+// extractBody extracts the text body, Message-ID, References, and attachment
+// metadata from an email message.
+func (r *Reader) extractBody(reader io.Reader) (string, string, []string, []emailtypes.Attachment, error) {
 	mr, err := mail.CreateReader(reader)
 	if err != nil {
-		return "", "", nil, fmt.Errorf("create MIME reader: %w", err)
+		return "", "", nil, nil, fmt.Errorf("create MIME reader: %w", err)
 	}
 
 	// Extract Message-ID from headers
 	messageID := mr.Header.Get("Message-Id")
 	if messageID == "" {
 		messageID = mr.Header.Get("Message-ID")
+	}
+
+	// Extract the References header (RFC 5322 §3.6.4). It is a whitespace-
+	// separated list of ancestor Message-IDs; we preserve it so replies can
+	// extend the threading chain instead of starting a new one.
+	var references []string
+	if refs := strings.Fields(mr.Header.Get("References")); len(refs) > 0 {
+		references = refs
 	}
 
 	var textBody string
@@ -297,18 +445,18 @@ func (r *Reader) extractBody(reader io.Reader) (string, string, []emailtypes.Att
 		if err == io.EOF {
 			break
 		} else if err != nil {
-			return "", "", nil, fmt.Errorf("read MIME part: %w", err)
+			return "", "", nil, nil, fmt.Errorf("read MIME part: %w", err)
 		}
 
 		switch h := part.Header.(type) {
 		case *mail.InlineHeader:
 			contentType, _, err := h.ContentType()
 			if err != nil {
-				return "", "", nil, fmt.Errorf("read inline content type: %w", err)
+				return "", "", nil, nil, fmt.Errorf("read inline content type: %w", err)
 			}
 			data, err := readPart(part.Body, maxBodyBytes, errBodyTooLarge)
 			if err != nil {
-				return "", "", nil, err
+				return "", "", nil, nil, err
 			}
 
 			if strings.HasPrefix(strings.ToLower(contentType), "text/plain") {
@@ -319,18 +467,18 @@ func (r *Reader) extractBody(reader io.Reader) (string, string, []emailtypes.Att
 		case *mail.AttachmentHeader:
 			filename, err := h.Filename()
 			if err != nil {
-				return "", "", nil, fmt.Errorf("read attachment filename: %w", err)
+				return "", "", nil, nil, fmt.Errorf("read attachment filename: %w", err)
 			}
 			contentType, _, err := h.ContentType()
 			if err != nil {
-				return "", "", nil, fmt.Errorf("read attachment content type: %w", err)
+				return "", "", nil, nil, fmt.Errorf("read attachment content type: %w", err)
 			}
 			size, err := io.Copy(io.Discard, io.LimitReader(part.Body, maxAttachmentBytes+1))
 			if err != nil {
-				return "", "", nil, fmt.Errorf("read attachment: %w", err)
+				return "", "", nil, nil, fmt.Errorf("read attachment: %w", err)
 			}
 			if size > maxAttachmentBytes {
-				return "", "", nil, errAttachmentTooLarge
+				return "", "", nil, nil, errAttachmentTooLarge
 			}
 			attachments = append(attachments, emailtypes.Attachment{
 				Filename:    filename,
@@ -342,13 +490,13 @@ func (r *Reader) extractBody(reader io.Reader) (string, string, []emailtypes.Att
 
 	// Prefer plain text, fallback to HTML
 	if textBody != "" {
-		return textBody, messageID, attachments, nil
+		return textBody, messageID, references, attachments, nil
 	}
 	if htmlBody != "" {
-		return r.stripHTML(htmlBody), messageID, attachments, nil
+		return r.stripHTML(htmlBody), messageID, references, attachments, nil
 	}
 
-	return "", messageID, attachments, nil
+	return "", messageID, references, attachments, nil
 }
 
 func readPart(reader io.Reader, limit int64, limitErr error) ([]byte, error) {
@@ -395,11 +543,14 @@ func (r *Reader) stripHTML(html string) string {
 	return strings.TrimSpace(html)
 }
 
-// createPreview creates a preview of the body.
+// createPreview creates a preview of the body. It collapses blank lines and
+// appends an ellipsis only when the preview was actually truncated, so a short
+// message never gains a spurious "...".
 func (r *Reader) createPreview(body string, maxLen int) string {
 	lines := strings.Split(body, "\n")
 	var preview []string
 	currentLen := 0
+	truncated := false
 
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
@@ -409,8 +560,11 @@ func (r *Reader) createPreview(body string, maxLen int) string {
 		if currentLen+len(line) > maxLen {
 			remaining := maxLen - currentLen
 			if remaining > 0 {
-				preview = append(preview, line[:remaining])
+				// Truncate on a UTF-8 rune boundary so multibyte text is not
+				// corrupted when the byte budget runs out mid-codepoint.
+				preview = append(preview, safeSlicePrefix(line, remaining))
 			}
+			truncated = true
 			break
 		}
 		preview = append(preview, line)
@@ -418,7 +572,7 @@ func (r *Reader) createPreview(body string, maxLen int) string {
 	}
 
 	result := strings.Join(preview, " ")
-	if len(body) > maxLen {
+	if truncated {
 		result += "..."
 	}
 	return result

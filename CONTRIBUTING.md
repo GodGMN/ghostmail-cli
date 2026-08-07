@@ -21,6 +21,7 @@ Thank you for your interest in contributing to Ghostmail CLI! This document prov
 - Go 1.25.12 or later
 - Git
 - Make (optional, for using Makefile)
+- golangci-lint v2.x (optional, for `make lint`; config is committed in `.golangci.yml`)
 
 ### Setting Up the Development Environment
 
@@ -37,12 +38,17 @@ Thank you for your interest in contributing to Ghostmail CLI! This document prov
 
 3. **Verify the setup by running tests:**
    ```bash
-   go test ./...
+   make test
    ```
 
 4. **Build the project:**
    ```bash
-   go build ./cmd/ghostmail
+   make build
+   ```
+
+5. **Run the full CI suite locally (tests, vet, lint, vulnscan, formatting):**
+   ```bash
+   make ci-check
    ```
 
 ### Project Structure
@@ -224,7 +230,7 @@ If a tag was created from an unbuildable commit, leave it unchanged and publish 
 6. **Create a Pull Request:**
    - Go to the GitHub repository
    - Click "New Pull Request"
-   - Select your branch and compare with `main`
+   - Select your branch and compare with `master`
    - Fill in the PR template
 
 ## Commit Message Guidelines

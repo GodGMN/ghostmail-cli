@@ -193,14 +193,25 @@ ghostmail send \
 
 ### 7. Reply to Email (Threading)
 
-To reply to an email and maintain the thread:
+The `reply` command fetches the original message, quotes it, and sets the
+`In-Reply-To`/`References` headers automatically. You only need the UID:
+
+```bash
+# Reply to a message by UID (threading is handled for you)
+ghostmail reply --uid 12345 --body "Thanks for the update"
+
+# Reply to all recipients (includes the original To and CC)
+ghostmail reply --uid 12345 --body "Thanks everyone" --all
+```
+
+If you need to thread a reply manually with `send`, read the message first to
+get its Message-ID — the field is exposed as `message_id` in the JSON output:
 
 ```bash
 # First, get the original message ID
-original_msg=$(ghostmail read --uid 12345 --json)
-message_id=$(echo "$original_msg" | jq -r '.message.headers["Message-ID"]')
+message_id=$(ghostmail read --uid 12345 --json | jq -r '.message.message_id')
 
-# Send reply with In-Reply-To header
+# Send a threaded reply with In-Reply-To
 ghostmail send \
   --to "sender@example.com" \
   --subject "Re: Original Subject" \

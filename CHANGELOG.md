@@ -26,7 +26,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added a vulnerability reporting policy and weekly dependency update checks for Go modules and GitHub Actions.
 - SMTP and IMAP require TLS or STARTTLS by default, and message parsing enforces size limits for untrusted MIME content.
 
-## [1.0.0] - 2024-01-15
+## [1.0.2] - 2026-08-07
+
+### Fixed
+- Removed a duplicate checksum file upload from the release workflow so the published `ghostmail-checksums.txt` only lists release binaries.
+
+## [1.0.1] - 2026-08-07
+
+### Added
+- Re-published installable cross-platform release artifacts for Linux (amd64), macOS (amd64, arm64), and Windows (amd64), built from a commit that includes the `cmd/ghostmail` entry point.
+- SHA-256 checksums attached to each release.
+
+### Fixed
+- Corrective release: `v1.0.0` could not build because `cmd/ghostmail/main.go` was missing. `v1.0.1` ships from a buildable commit.
+
+## [1.0.0] - 2024-01-15 — NOT INSTALLABLE
 
 ### Added
 - Initial release of Ghostmail CLI
@@ -59,4 +73,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Support for Gmail App Passwords
 - TLS/STARTTLS support for secure connections
 
+> **Note:** The `v1.0.0` tag predates `cmd/ghostmail/main.go` and produces no
+> installable binary. Do not `go install ...@v1.0.0`. Use `v1.0.1` or later.
+
+[1.0.2]: https://github.com/GodGMN/ghostmail-cli/releases/tag/v1.0.2
+[1.0.1]: https://github.com/GodGMN/ghostmail-cli/releases/tag/v1.0.1
 [1.0.0]: https://github.com/GodGMN/ghostmail-cli/releases/tag/v1.0.0

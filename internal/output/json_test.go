@@ -11,20 +11,12 @@ import (
 )
 
 func TestNewJSONOutput(t *testing.T) {
-	// Test with indentation
 	out := NewJSONOutput(true)
-	if out == nil {
-		t.Error("NewJSONOutput(true) returned nil")
-	}
 	if !out.indent {
 		t.Error("NewJSONOutput(true).indent should be true")
 	}
 
-	// Test without indentation
 	out = NewJSONOutput(false)
-	if out == nil {
-		t.Error("NewJSONOutput(false) returned nil")
-	}
 	if out.indent {
 		t.Error("NewJSONOutput(false).indent should be false")
 	}
@@ -272,7 +264,7 @@ func BenchmarkPrint(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		out.Print(data)
+		_ = out.Print(data)
 	}
 }
 
@@ -295,6 +287,6 @@ func BenchmarkPrintIndent(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		out.Print(data)
+		_ = out.Print(data)
 	}
 }

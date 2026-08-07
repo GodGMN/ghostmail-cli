@@ -18,8 +18,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/GodGMN/ghostmail-cli/internal/config"
 	mail "github.com/wneessen/go-mail"
+
+	"github.com/GodGMN/ghostmail-cli/internal/config"
 )
 
 func TestSendRejectsPlaintextCredentials(t *testing.T) {
@@ -117,9 +118,9 @@ func TestMailClientSelectsSupportedAuthentication(t *testing.T) {
 		authMethods string
 		want        string
 	}{
-		{name: "CRAM-MD5 preferred", authMethods: "CRAM-MD5 PLAIN LOGIN", want: "CRAM-MD5"},
-		{name: "PLAIN preferred over LOGIN", authMethods: "PLAIN LOGIN", want: "PLAIN"},
-		{name: "LOGIN fallback", authMethods: "LOGIN", want: "LOGIN"},
+		{name: "PLAIN preferred over CRAM-MD5 under TLS", authMethods: "CRAM-MD5 PLAIN LOGIN", want: "PLAIN"},
+		{name: "LOGIN preferred over CRAM-MD5 under TLS", authMethods: "CRAM-MD5 LOGIN", want: "LOGIN"},
+		{name: "CRAM-MD5 only as last resort", authMethods: "CRAM-MD5", want: "CRAM-MD5"},
 	}
 
 	for _, tt := range tests {
@@ -367,4 +368,146 @@ func testCertificate(t *testing.T) tls.Certificate {
 		t.Fatalf("X509KeyPair() error = %v", err)
 	}
 	return cert
+}
+
+// TestSendOptionsApplyDirectly exercises the SendOption builders by applying
+// them to an unexported sendOptions value. This covers the option functions
+// that Send() consumes internally (WithHTMLBody, WithAttachments, WithInReplyTo,
+// WithReferences) which are otherwise hard to assert on from outside the
+// package.
+func TestSendOptionsApplyDirectly(t *testing.T) {
+	o := &sendOptions{}
+	WithCC([]string{"cc@example.test"})(o)
+	WithBCC([]string{"bcc@example.test"})(o)
+	WithHTMLBody("<b>hi</b>")(o)
+	WithAttachments([]string{"a.pdf", "b.png"})(o)
+	WithHeaders(map[string]string{"X-Custom": "v"})(o)
+	WithInReplyTo("<original@example.test>")(o)
+	WithReferences([]string{"<grandparent@example.test>", "<parent@example.test>"})(o)
+
+	if !sameStrings(o.cc, []string{"cc@example.test"}) {
+		t.Errorf("cc = %v", o.cc)
+	}
+	if !sameStrings(o.bcc, []string{"bcc@example.test"}) {
+		t.Errorf("bcc = %v", o.bcc)
+	}
+	if o.htmlBody != "<b>hi</b>" {
+		t.Errorf("htmlBody = %q", o.htmlBody)
+	}
+	if !sameStrings(o.attachments, []string{"a.pdf", "b.png"}) {
+		t.Errorf("attachments = %v", o.attachments)
+	}
+	if o.headers["X-Custom"] != "v" {
+		t.Errorf("headers = %v", o.headers)
+	}
+	if o.inReplyTo != "<original@example.test>" {
+		t.Errorf("inReplyTo = %q", o.inReplyTo)
+	}
+	if !sameStrings(o.references, []string{"<grandparent@example.test>", "<parent@example.test>"}) {
+		t.Errorf("references = %v", o.references)
+	}
+}
+
+// TestSendEmitsThreadingHeadersAndHTMLAlternative sends a message with
+// In-Reply-To, References, and an HTML body, then verifies those headers and
+// the multipart/alternative structure appear on the wire. This is the
+// end-to-end proof that reply threading is actually emitted, not just built.
+func TestSendEmitsThreadingHeadersAndHTMLAlternative(t *testing.T) {
+	server := newSMTPTestServer(t, true, false)
+	cfg := server.config()
+	cfg.StartTLS = true
+	cfg.Username = "user"
+	cfg.Password = "password"
+	cfg.From = "sender@example.test"
+
+	sender := NewSender(cfg)
+	// Inject the test CA so Send()'s STARTTLS handshake can verify the
+	// self-signed test certificate. Production callers use system roots.
+	sender.tlsRoots = server.clientTLSConfig().RootCAs
+
+	err := sender.Send(
+		[]string{"to@example.test"},
+		"Re: thread",
+		"plain fallback",
+		WithHTMLBody("<p>HTML version</p>"),
+		WithInReplyTo("<original@example.test>"),
+		WithReferences([]string{"<grandparent@example.test>", "<parent@example.test>"}),
+	)
+	if err != nil {
+		t.Fatalf("Send() error = %v", err)
+	}
+
+	session := server.session(t)
+	// In-Reply-To carries the immediate parent; References carries the full
+	// ancestry. The exact separator (space vs comma) is go-mail's choice; we
+	// assert each ancestor Message-ID is present on the wire.
+	for _, want := range []string{
+		"In-Reply-To: <original@example.test>",
+		"<grandparent@example.test>",
+		"<parent@example.test>",
+		"Subject: Re: thread",
+		"plain fallback",
+		"HTML version",
+	} {
+		if !strings.Contains(session.message, want) {
+			t.Errorf("message missing %q:\n%s", want, session.message)
+		}
+	}
+	if !strings.Contains(session.message, "References:") {
+		t.Errorf("message missing References header:\n%s", session.message)
+	}
+}
+
+func TestFormatQuotedReply(t *testing.T) {
+	tests := []struct {
+		name      string
+		replyBody string
+		original  string
+		from      string
+		date      string
+		want      string
+	}{
+		{
+			name:      "full quote",
+			replyBody: "Thanks!",
+			original:  "Line one\nLine two",
+			from:      "alice@example.com",
+			date:      "2026-08-07 10:00",
+			want:      "Thanks!\n\nOn 2026-08-07 10:00, alice@example.com wrote:\n> Line one\n> Line two",
+		},
+		{
+			name:      "empty reply body omits leading blank line but still quotes",
+			replyBody: "",
+			original:  "Hello",
+			from:      "bob@example.com",
+			date:      "2026-08-07 10:00",
+			want:      "On 2026-08-07 10:00, bob@example.com wrote:\n> Hello",
+		},
+		{
+			name:      "multiline original each line prefixed",
+			replyBody: "Ok",
+			original:  "a\nb\nc",
+			from:      "c@example.com",
+			date:      "D",
+			want:      "Ok\n\nOn D, c@example.com wrote:\n> a\n> b\n> c",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := FormatQuotedReply(tt.replyBody, tt.original, tt.from, tt.date)
+			if got != tt.want {
+				t.Errorf("FormatQuotedReply() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestSendRequiresAtLeastOneRecipient is a fast unit test for the empty-recipient
+// guard that does not require a server.
+func TestSendRequiresAtLeastOneRecipient(t *testing.T) {
+	sender := NewSender(&config.SMTPConfig{Host: "h", StartTLS: true})
+	err := sender.Send(nil, "subject", "body")
+	if err == nil || !strings.Contains(err.Error(), "recipient") {
+		t.Errorf("Send(nil recipients) error = %v, want recipient error", err)
+	}
 }

@@ -4,6 +4,7 @@ A lightweight, fast command-line email client for sending and reading emails via
 
 [![Go Version](https://img.shields.io/badge/go-1.25.12%2B-blue.svg)](https://go.dev)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![CI](https://github.com/GodGMN/ghostmail-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/GodGMN/ghostmail-cli/actions/workflows/ci.yml)
 
 ## Features
 
@@ -20,7 +21,7 @@ A lightweight, fast command-line email client for sending and reading emails via
 - 🔒 **Environment-based configuration** - no credentials stored in code
 - 🤖 **JSON output mode** for easy integration with scripts and agents
 - 🎨 **Colored terminal output** (can be disabled)
-- 🖥️ **Cross-platform** - works on Linux, macOS, and Windows
+- 🖥️ **Cross-platform** - works on Linux (amd64/arm64), macOS (amd64/arm64), and Windows (amd64)
 
 ## Table of Contents
 
@@ -49,7 +50,17 @@ go install github.com/GodGMN/ghostmail-cli/cmd/ghostmail@latest
 
 ### Pre-built Binaries
 
-Pre-built binaries are not currently published. Install or build from source instead.
+Pre-built binaries for Linux (amd64, arm64), macOS (amd64, arm64), and Windows (amd64)
+are published on the [GitHub Releases page](https://github.com/GodGMN/ghostmail-cli/releases)
+for every tagged release. Each release ships with SHA-256 checksums
+(`ghostmail-checksums.txt`) — verify a download with:
+
+```bash
+sha256sum -c ghostmail-checksums.txt --ignore-missing
+```
+
+> Note: the `v1.0.0` tag predates the `cmd/ghostmail` entry point and does not
+> produce an installable release. Use `v1.0.1` or later.
 
 ### Building from Source
 
@@ -226,7 +237,7 @@ ghostmail read --uid <UID>
 |------|-------|-------------|
 | `--uid` | `-u` | Message UID (required) |
 | `--mailbox` | `-m` | Mailbox to read from | INBOX |
-| `--raw` | | Show the message preview instead of the full body |
+| `--raw` | | Fetch only a small body prefix (fast preview, no full MIME parse) |
 
 **Examples:**
 
@@ -237,7 +248,7 @@ ghostmail read --uid 12345
 # Read from specific mailbox
 ghostmail read --uid 12345 --mailbox Archive
 
-# Quick preview (faster, no body parsing)
+# Quick preview (fetches only a few KB, no full body parse)
 ghostmail read --uid 12345 --raw
 
 # Get JSON for scripting
@@ -336,7 +347,7 @@ These flags work with all commands:
 |------|-------|-------------|
 | `--json` | `-j` | Output in JSON format |
 | `--no-color` | | Disable colored output |
-| `--verbose` | `-v` | Enable verbose output |
+| `--verbose` | `-v` | Print connection details to stderr |
 | `--help` | `-h` | Show help |
 | `--version` | | Show version |
 
@@ -504,7 +515,8 @@ Error: attachment file.pdf is too large: 15.2MB (max 10MB)
 
 ### Debug Mode
 
-Use `--verbose` flag to see detailed error messages:
+Use `--verbose` flag to see connection details (server address, TLS mode,
+recipient/attachment counts) on stderr:
 
 ```bash
 ghostmail send --to test@example.com -s "Test" -b "Body" --verbose
@@ -563,13 +575,22 @@ make clean
 | Target | Description |
 |--------|-------------|
 | `build` | Build binary for current platform |
-| `build-linux` | Build for Linux (amd64) |
+| `build-linux` | Build for Linux (amd64, arm64) |
 | `build-darwin` | Build for macOS (amd64, arm64) |
 | `build-windows` | Build for Windows (amd64) |
 | `build-all` | Build for all platforms |
-| `test` | Run tests |
+| `test` | Run tests with race detection |
+| `cover` | Generate a coverage report |
+| `fmt` | Format Go code (`go fmt` + `gofmt -s`) |
+| `vet` | Run `go vet` |
+| `lint` | Run `golangci-lint` (requires `.golangci.yml`) |
+| `check` | Run fmt, vet, lint, and test together |
+| `ci-check` | Full local CI mirror: test, vet, lint, govulncheck, gofmt gate |
 | `clean` | Clean build artifacts |
 | `install` | Install to $GOPATH/bin |
+
+Reproducible release builds: `make build-all SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)`
+produces byte-identical binaries across machines (uses `-trimpath -s -w`).
 
 ## Security Notes
 
@@ -597,5 +618,6 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 - [Cobra](https://github.com/spf13/cobra) - CLI framework
 - [go-imap](https://github.com/emersion/go-imap) - IMAP client library
-- [Gomail](https://gopkg.in/gomail.v2) - SMTP email library
+- [go-mail](https://github.com/wneessen/go-mail) - SMTP email library
+- [go-message](https://github.com/emersion/go-message) - MIME message parsing
 - [Color](https://github.com/fatih/color) - Terminal colors

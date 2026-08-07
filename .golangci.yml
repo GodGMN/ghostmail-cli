@@ -1,0 +1,72 @@
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  default: standard
+  enable:
+    - bodyclose
+    - revive
+    - misspell
+    - unconvert
+    - unparam
+  settings:
+    errcheck:
+      # Ignore return values that are conventionally unchecked: terminal output,
+      # cleanup/teardown paths, and flag registration that cannot fail in practice.
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - io.Copy
+        - (io.Closer).Close
+        - (net.Conn).Close
+        - (*os.File).Close
+        - (*text/tabwriter.Writer).Flush
+        - (*github.com/emersion/go-imap/client.Client).Logout
+        - (*github.com/fatih/color.Color).Printf
+        - (*github.com/fatih/color.Color).Print
+        - (*github.com/spf13/cobra.Command).MarkFlagRequired
+    revive:
+      rules:
+        - name: blank-imports
+        - name: context-as-argument
+        - name: context-keys-type
+        - name: dot-imports
+        - name: error-naming
+        - name: error-strings
+        - name: error-return
+        - name: errorf
+        - name: exported
+          arguments: ["disableStutteringCheck"]
+        - name: increment-decrement
+        - name: indent-error-flow
+        - name: range
+        - name: receiver-naming
+        - name: time-naming
+        - name: var-declaration
+        - name: var-naming
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/GodGMN/ghostmail-cli
+
+issues:
+  exclude-rules:
+    # Test helpers commonly have unused parameters, naming exceptions, and
+    # intentionally ignore teardown/cleanup errors.
+    - paths:
+        - _test\.go
+      linters:
+        - unparam
+        - revive
+        - errcheck
+  max-issues-per-linter: 0
+  max-same-issues: 0

@@ -1,0 +1,7 @@
+# Default owners for the whole repository. PRs require review from at least
+# one of these maintainers before merging.
+*       @GodGMN
+
+# CI/release automation is sensitive; call it out explicitly so changes to
+# workflows and Dependabot config get prompt attention.
+/.github/   @GodGMN

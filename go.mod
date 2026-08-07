@@ -1,6 +1,6 @@
 module github.com/GodGMN/ghostmail-cli
 
-go 1.25.0
+go 1.25.12
 
 require (
 	github.com/emersion/go-imap v1.2.1

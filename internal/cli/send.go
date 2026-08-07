@@ -4,13 +4,28 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/fatih/color"
+	"github.com/spf13/cobra"
+
 	"github.com/GodGMN/ghostmail-cli/internal/config"
 	emailinternal "github.com/GodGMN/ghostmail-cli/internal/email"
 	"github.com/GodGMN/ghostmail-cli/internal/output"
 	emailtypes "github.com/GodGMN/ghostmail-cli/pkg/email"
-	"github.com/fatih/color"
-	"github.com/spf13/cobra"
 )
+
+// emailSender is the subset of the email sender that the send command needs.
+// It exists so tests can inject a fake sender and exercise the command's
+// validation and option-building branches without delivering real mail.
+type emailSender interface {
+	Send(to []string, subject, body string, opts ...emailinternal.SendOption) error
+}
+
+// sendSenderFactory builds an emailSender from an SMTP config. It is a
+// package-level seam so tests can replace it; production callers use the real
+// email sender.
+var sendSenderFactory = func(cfg *config.SMTPConfig) emailSender {
+	return emailinternal.NewSender(cfg)
+}
 
 func newSendCmd() *cobra.Command {
 	var (
@@ -125,7 +140,7 @@ For more help, use: ghostmail send --help`,
 			}
 
 			// Send email
-			sender := emailinternal.NewSender(&cfg.SMTP)
+			sender := sendSenderFactory(&cfg.SMTP)
 			opts := []emailinternal.SendOption{
 				emailinternal.WithCC(cc),
 				emailinternal.WithBCC(bcc),
@@ -138,9 +153,12 @@ For more help, use: ghostmail send --help`,
 				opts = append(opts, emailinternal.WithInReplyTo(inReplyTo))
 			}
 
+			debugf("connecting to SMTP server %s:%d (starttls=%t, tls=%t, recipients=%d, attachments=%d)",
+				cfg.SMTP.Host, cfg.SMTP.Port, cfg.SMTP.StartTLS, cfg.SMTP.UseTLS, len(to), len(attachments))
 			if err := sender.Send(to, subject, body, opts...); err != nil {
 				return handleError(err)
 			}
+			debugf("message accepted by server")
 
 			// Output result
 			if jsonOutput {
@@ -180,7 +198,6 @@ For more help, use: ghostmail send --help`,
 func handleError(err error) error {
 	if jsonOutput {
 		output.PrintErrorMsg(err.Error())
-		os.Exit(1)
 	}
 	return err
 }

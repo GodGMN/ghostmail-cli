@@ -5,13 +5,40 @@ import (
 	"os"
 	"strings"
 
+	"github.com/fatih/color"
+	"github.com/spf13/cobra"
+
 	"github.com/GodGMN/ghostmail-cli/internal/config"
 	emailinternal "github.com/GodGMN/ghostmail-cli/internal/email"
 	"github.com/GodGMN/ghostmail-cli/internal/output"
 	emailtypes "github.com/GodGMN/ghostmail-cli/pkg/email"
-	"github.com/fatih/color"
-	"github.com/spf13/cobra"
 )
+
+// replyReader is the subset of the email reader that the reply command needs.
+// It exists so tests can inject a fake reader and exercise the command's
+// threading logic without standing up an IMAP server.
+type replyReader interface {
+	ReadMessage(uid uint32) (*emailtypes.Message, error)
+}
+
+// replySender is the subset of the email sender that the reply command needs.
+type replySender interface {
+	Send(to []string, subject, body string, opts ...emailinternal.SendOption) error
+}
+
+// replyReaderFactory builds a replyReader from an IMAP config. It is a
+// package-level seam so tests can replace it; production callers use the real
+// email reader.
+var replyReaderFactory = func(cfg *config.IMAPConfig) replyReader {
+	return emailinternal.NewReader(cfg)
+}
+
+// replySenderFactory builds a replySender from an SMTP config. It is a
+// package-level seam so tests can capture the outbound message without
+// delivering it.
+var replySenderFactory = func(cfg *config.SMTPConfig) replySender {
+	return emailinternal.NewSender(cfg)
+}
 
 func newReplyCmd() *cobra.Command {
 	var (
@@ -98,7 +125,7 @@ For more help, use: ghostmail reply --help`,
 			}
 
 			// Fetch original message
-			reader := emailinternal.NewReader(&cfg.IMAP)
+			reader := replyReaderFactory(&cfg.IMAP)
 			original, err := reader.ReadMessage(uid)
 			if err != nil {
 				return handleError(fmt.Errorf("failed to fetch original message: %w. Use --help for usage info", err))
@@ -148,23 +175,25 @@ For more help, use: ghostmail reply --help`,
 				replyBody = emailinternal.FormatQuotedReply(body, original.Body, original.From, dateStr)
 			}
 
-			// Build references chain
-			var references []string
-			if original.MessageID != "" {
-				references = append(references, original.MessageID)
-			}
+			// Build the References chain per RFC 5322 §3.6.4: the reply's
+			// References are the original's ancestors followed by the original
+			// Message-ID itself, so clients render the full conversation.
+			references := buildReferencesChain(original.References, original.MessageID)
 
 			// Send the reply
-			sender := emailinternal.NewSender(&cfg.SMTP)
+			sender := replySenderFactory(&cfg.SMTP)
 			opts := []emailinternal.SendOption{}
 
 			if len(cc) > 0 {
 				opts = append(opts, emailinternal.WithCC(cc))
 			}
 
-			// Set threading headers
+			// Set threading headers. In-Reply-To identifies the immediate
+			// parent; References carries the full ancestry.
 			if original.MessageID != "" {
 				opts = append(opts, emailinternal.WithInReplyTo(original.MessageID))
+			}
+			if len(references) > 0 {
 				opts = append(opts, emailinternal.WithReferences(references))
 			}
 
@@ -225,4 +254,28 @@ func isSelf(addr, from, username string) bool {
 	}
 
 	return addr == from || addr == username
+}
+
+// buildReferencesChain constructs the References header value for a reply per
+// RFC 5322 §3.6.4: the original message's ancestor References followed by the
+// original's own Message-ID. Each Message-ID appears at most once
+// (de-duplicated, insertion order preserved). Empty inputs are ignored.
+func buildReferencesChain(ancestorRefs []string, messageID string) []string {
+	seen := make(map[string]struct{}, len(ancestorRefs)+1)
+	var chain []string
+	add := func(id string) {
+		if id == "" {
+			return
+		}
+		if _, ok := seen[id]; ok {
+			return
+		}
+		seen[id] = struct{}{}
+		chain = append(chain, id)
+	}
+	for _, ref := range ancestorRefs {
+		add(ref)
+	}
+	add(messageID)
+	return chain
 }

@@ -3,22 +3,40 @@ package email
 
 import (
 	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"strings"
 	"time"
 
-	"github.com/GodGMN/ghostmail-cli/internal/config"
 	mail "github.com/wneessen/go-mail"
+
+	"github.com/GodGMN/ghostmail-cli/internal/config"
 )
 
 // Sender handles email sending operations.
 type Sender struct {
 	config *config.SMTPConfig
+	// tlsRoots, when non-nil, overrides the system root certificate pool used
+	// to verify the SMTP server. It is intentionally unexported so only tests
+	// in this package can inject a custom trust store; production callers rely
+	// on the host's root CA set, which is the secure default.
+	tlsRoots *x509.CertPool
 }
 
 // NewSender creates a new email sender.
 func NewSender(cfg *config.SMTPConfig) *Sender {
 	return &Sender{config: cfg}
+}
+
+// tlsConfig returns the TLS configuration for SMTP connections. When tlsRoots
+// is set (tests only), it is used as the trust store; otherwise the system
+// roots are used, matching the production default.
+func (s *Sender) tlsConfig() *tls.Config {
+	cfg := &tls.Config{MinVersion: tls.VersionTLS12, ServerName: s.config.Host}
+	if s.tlsRoots != nil {
+		cfg.RootCAs = s.tlsRoots
+	}
+	return cfg
 }
 
 // Send sends an email message.
@@ -95,7 +113,7 @@ func (s *Sender) Send(to []string, subject, body string, opts ...SendOption) err
 		m.AttachFile(attachment)
 	}
 
-	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12, ServerName: s.config.Host}
+	tlsConfig := s.tlsConfig()
 	client, err := newMailClient(s.config, tlsConfig)
 	if err != nil {
 		return fmt.Errorf("failed to connect to SMTP server: %w", err)
@@ -127,11 +145,18 @@ func newMailClient(cfg *config.SMTPConfig, tlsConfig *tls.Config) (*mail.Client,
 		options = append(options, mail.WithSSL())
 	}
 	if cfg.Username != "" {
-		authTypes := []mail.SMTPAuthType{mail.SMTPAuthCramMD5}
+		var authTypes []mail.SMTPAuthType
 		if cfg.AllowInsecure && !cfg.UseTLS && !cfg.StartTLS {
-			authTypes = append(authTypes, mail.SMTPAuthPlainNoEnc, mail.SMTPAuthLoginNoEnc)
+			// Plaintext transport: prefer challenge-response mechanisms that do
+			// not expose the password, falling back to cleartext only if the
+			// server does not offer them.
+			authTypes = []mail.SMTPAuthType{mail.SMTPAuthCramMD5, mail.SMTPAuthPlainNoEnc, mail.SMTPAuthLoginNoEnc}
 		} else {
-			authTypes = append(authTypes, mail.SMTPAuthPlain, mail.SMTPAuthLogin)
+			// TLS-protected transport: PLAIN and LOGIN are the strong,
+			// widely-supported choices. CRAM-MD5 (MD5-based, susceptible to
+			// offline dictionary attacks) is only a last-resort fallback for
+			// legacy servers that offer nothing else.
+			authTypes = []mail.SMTPAuthType{mail.SMTPAuthPlain, mail.SMTPAuthLogin, mail.SMTPAuthCramMD5}
 		}
 		options = append(options,
 			mail.WithUsername(cfg.Username),

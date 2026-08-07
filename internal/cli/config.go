@@ -167,12 +167,12 @@ what variables need to be set.`,
 	}
 }
 
+// maskPassword renders a stored password safe for display. It reveals no
+// characters of the secret itself — only that one is set and roughly how long
+// it is, which is enough to confirm a value is configured without leaking it.
 func maskPassword(s string) string {
 	if s == "" {
 		return ""
 	}
-	if len(s) <= 4 {
-		return "****"
-	}
-	return s[:2] + "****" + s[len(s)-2:]
+	return fmt.Sprintf("********(%d chars)", len(s))
 }

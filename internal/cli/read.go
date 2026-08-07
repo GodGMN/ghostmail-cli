@@ -4,13 +4,29 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/fatih/color"
+	"github.com/spf13/cobra"
+
 	"github.com/GodGMN/ghostmail-cli/internal/config"
 	emailinternal "github.com/GodGMN/ghostmail-cli/internal/email"
 	"github.com/GodGMN/ghostmail-cli/internal/output"
 	emailtypes "github.com/GodGMN/ghostmail-cli/pkg/email"
-	"github.com/fatih/color"
-	"github.com/spf13/cobra"
 )
+
+// messageReader is the subset of the email reader that the read command needs.
+// It exists so tests can inject a fake reader and exercise the command's
+// output branches without standing up an IMAP server.
+type messageReader interface {
+	ReadMessage(uid uint32) (*emailtypes.Message, error)
+	ReadMessagePreview(uid uint32) (*emailtypes.Message, error)
+}
+
+// readReaderFactory builds a messageReader from an IMAP config. It is a
+// package-level seam so tests can replace it; production callers use the real
+// email reader.
+var readReaderFactory = func(cfg *config.IMAPConfig) messageReader {
+	return emailinternal.NewReader(cfg)
+}
 
 func newReadCmd() *cobra.Command {
 	var (
@@ -34,7 +50,7 @@ EXAMPLES:
   # Read from specific mailbox
   ghostmail read --uid 12345 --mailbox Archive
 
-  # Quick preview (faster, no body parsing)
+  # Quick preview (fetches only a few KB, no full body parse)
   ghostmail read --uid 12345 --raw
 
   # Get JSON for scripting
@@ -64,9 +80,17 @@ For more help, use: ghostmail read --help`,
 				cfg.IMAP.Mailbox = mailbox
 			}
 
-			// Fetch message
-			reader := emailinternal.NewReader(&cfg.IMAP)
-			msg, err := reader.ReadMessage(uid)
+			// Fetch message. --raw uses the lightweight preview path that avoids
+			// fetching the full body; without --raw we fetch and parse everything.
+			reader := readReaderFactory(&cfg.IMAP)
+			debugf("connecting to IMAP server %s:%d (mailbox=%q, uid=%d, raw=%t)",
+				cfg.IMAP.Host, cfg.IMAP.Port, cfg.IMAP.Mailbox, uid, raw)
+			var msg *emailtypes.Message
+			if raw {
+				msg, err = reader.ReadMessagePreview(uid)
+			} else {
+				msg, err = reader.ReadMessage(uid)
+			}
 			if err != nil {
 				return handleError(fmt.Errorf("%w. Use --help for usage info", err))
 			}
@@ -164,7 +188,7 @@ For more help, use: ghostmail read --help`,
 
 	cmd.Flags().Uint32VarP(&uid, "uid", "u", 0, "Message UID (required). Get from 'ghostmail inbox'")
 	cmd.Flags().StringVarP(&mailbox, "mailbox", "m", "", "Mailbox to read from (default: INBOX)")
-	cmd.Flags().BoolVar(&raw, "raw", false, "Show message preview instead of full body")
+	cmd.Flags().BoolVar(&raw, "raw", false, "Fetch only a small body prefix (fast preview, no full MIME parse)")
 
 	cmd.MarkFlagRequired("uid")
 

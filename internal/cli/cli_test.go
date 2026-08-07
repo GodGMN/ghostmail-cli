@@ -87,8 +87,8 @@ func TestMaskPassword(t *testing.T) {
 		want  string
 	}{
 		{"", ""},
-		{"abcd", "****"},
-		{"secret", "se****et"},
+		{"abcd", "********(4 chars)"},
+		{"secret", "********(6 chars)"},
 	} {
 		if got := maskPassword(tt.input); got != tt.want {
 			t.Errorf("maskPassword(%q) = %q, want %q", tt.input, got, tt.want)
@@ -131,8 +131,8 @@ func TestConfigCheckCommandReportsMissingAndMasksCredentials(t *testing.T) {
 	if strings.Contains(output, "supersecret") || strings.Contains(output, "imapsecret") {
 		t.Error("config check output exposed a password")
 	}
-	if !strings.Contains(output, "su****et") || !strings.Contains(output, "im****et") {
-		t.Errorf("config check output = %q, want masked passwords", output)
+	if !strings.Contains(output, "********(11 chars)") || !strings.Contains(output, "********(10 chars)") {
+		t.Errorf("config check output = %q, want masked passwords with length only", output)
 	}
 }
 

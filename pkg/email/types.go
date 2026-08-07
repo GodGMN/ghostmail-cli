@@ -10,6 +10,7 @@ type Message struct {
 	UID         uint32       `json:"uid,omitempty"`
 	SeqNum      uint32       `json:"seq_num,omitempty"`
 	MessageID   string       `json:"message_id,omitempty"`
+	References  []string     `json:"references,omitempty"`
 	Subject     string       `json:"subject"`
 	From        string       `json:"from"`
 	To          []string     `json:"to"`
@@ -27,19 +28,6 @@ type Attachment struct {
 	Filename    string `json:"filename"`
 	ContentType string `json:"content_type"`
 	Size        int    `json:"size"`
-}
-
-// SendRequest represents a request to send an email.
-type SendRequest struct {
-	From        string            `json:"from"`
-	To          []string          `json:"to"`
-	CC          []string          `json:"cc,omitempty"`
-	BCC         []string          `json:"bcc,omitempty"`
-	Subject     string            `json:"subject"`
-	Body        string            `json:"body"`
-	HTMLBody    string            `json:"html_body,omitempty"`
-	Attachments []string          `json:"attachments,omitempty"`
-	Headers     map[string]string `json:"headers,omitempty"`
 }
 
 // SendResponse represents the response from sending an email.
